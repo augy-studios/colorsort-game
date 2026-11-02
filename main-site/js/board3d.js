@@ -52,15 +52,18 @@ const MAX_POUR = (112 * Math.PI) / 180; // the furthest a tube tips
 
 // Durations in milliseconds, at normal speed.
 const T = {
-  lift: 240,
-  travel: 460,
-  pourUnit: 520,
-  back: 460,
-  unscrew: 340,
-  glide: 420,
-  screw: 360,
-  capIn: 300,
-  fast: 150,
+  lift: 160,
+  travel: 300,
+  pourUnit: 340,
+  back: 300,
+  unscrew: 220,
+  glide: 280,
+  screw: 230,
+  capIn: 220,
+  fast: 120,
+  // Extra time per unit of distance travelled, and the most it can add.
+  perDist: 45,
+  maxDist: 200,
 };
 
 /* ---- colours, from the theme's own tokens ---- */
@@ -889,7 +892,7 @@ export class Board3D {
         }
         angle = this.volume.pourAngle(remaining());
         const end = this.pourPose(lipTarget(), angle, side);
-        travel.dur = T.travel + Math.min(320, start.distanceTo(end.pos) * 70);
+        travel.dur = T.travel + Math.min(T.maxDist, start.distanceTo(end.pos) * T.perDist);
       },
       update: (p) => {
         if (!ctx.ok) return;
@@ -957,7 +960,7 @@ export class Board3D {
         start = ca.group.position.clone();
         startRot = ca.group.rotation.z;
         ca.lift = 0;
-        back.dur = (ctx.ok ? T.back : T.lift) + Math.min(320, start.distanceTo(ca.home) * 70);
+        back.dur = (ctx.ok ? T.back : T.lift) + Math.min(T.maxDist, start.distanceTo(ca.home) * T.perDist);
       },
       update: (p) => {
         const e = easeInOut(p);
@@ -1087,7 +1090,7 @@ export class Board3D {
         const D = T.screw / speed;
         const first = new THREE.Vector3();
         ca.nuts[len - 1].getWorldPosition(first);
-        const G = fast ? T.fast : T.glide + Math.min(320, first.distanceTo(hover) * 70);
+        const G = fast ? T.fast : T.glide + Math.min(T.maxDist, first.distanceTo(hover) * T.perDist);
         const gap = G + D * (fast ? 0.3 : 0.45);
         ctx.base = base;
         ctx.moving = ca.nuts.slice(len - n).reverse(); // topmost first
