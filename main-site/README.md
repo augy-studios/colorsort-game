@@ -40,7 +40,7 @@ server always agree on a level.
 | `party.js` | Party games on top of `p2p.js`: hosting, joining, the lobby, races and turns. |
 | `p2p.js` | Pairing over PeerJS, STUN only, verbatim from `docs/STUN-p2p-spec.md`. |
 | `qr.js` | QR encoder for the join link, from uwuPromptr, so it works offline. |
-| `tray.js` | The Edge Tray (`docs/edge-tray-spec.md`) and full screen. |
+| `tray.js` | The Edge Tray (`docs/edge-tray-spec.md`). |
 | `api.js`, `leaderboard.js`, `settings.js` | The API client, and the leaderboard and settings windows, after MRT Station Guesser's. |
 | `theme.js`, `icons.js`, `ui.js`, `update-bar.js`, `app.js` | Theme, inline SVG icons, view, modal and storage helpers, the update bar, and boot. |
 

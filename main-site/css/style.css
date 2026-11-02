@@ -436,7 +436,29 @@ body {
 /* ---- a level in play ---- */
 
 .play { gap: 8px; }
+/* The way out, top left of the box, with the level's name beside it. */
+.play-top {
+  width: 100%;
+  max-width: 560px;
+  display: grid;
+  /* The empty third column keeps the name centred while there is room;
+     on a narrow phone it gives way first. */
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, auto) 1fr;
+  align-items: center;
+  gap: 8px;
+}
+.play-top::after { content: ""; }
+.play-top .btn-danger { justify-self: start; }
+.play-top .hud-level { text-align: center; }
 .hud-level { font-size: 0.9rem; color: var(--muted); }
+.btn-danger {
+  color: var(--bg);
+  background: var(--error);
+  border: 1px solid var(--error);
+}
+.btn-danger:hover { background: color-mix(in srgb, var(--error) 85%, var(--ink)); }
+.btn-danger:focus-visible { outline: 2px solid var(--error); outline-offset: 2px; }
+.play-top .btn-danger { padding: 7px 14px; font-size: 0.9rem; }
 .hud {
   width: 100%;
   max-width: 560px;
@@ -533,6 +555,9 @@ body {
   height: 100%;
   z-index: 1;
   touch-action: none;
+  /* It reaches above the board, over the stats, so a tube pouring into the
+     top row is not cut off; taps there go to what is underneath. */
+  pointer-events: none;
   animation: panel-in 0.22s ease;
 }
 
@@ -569,7 +594,7 @@ body {
   width: calc(var(--u, 30px) * 1.5);
   height: calc(var(--u, 30px) * var(--cap, 4) + 14px);
   padding: 3px 3px 4px;
-  transition: transform 0.18s ease;
+  transition: transform 0.26s cubic-bezier(0.3, 0.7, 0.3, 1);
 }
 .funit {
   position: relative;
@@ -579,7 +604,7 @@ body {
   align-items: center;
   justify-content: center;
   background: var(--c);
-  transition: transform 0.18s ease;
+  transition: transform 0.26s cubic-bezier(0.3, 0.7, 0.3, 1);
 }
 .sym {
   width: 56%;
@@ -834,8 +859,6 @@ code {
 
 /* The controls under the board stay on screen with it. */
 .replay { --board-room: 560px; }
-.is-full .replay { --board-room: 440px; }
-.is-full .party { --board-room: 330px; }
 .rp-boards { grid-auto-flow: column; grid-auto-columns: 1fr; }
 
 .replay-score { color: var(--ink); font-variant-numeric: tabular-nums; }
@@ -1070,14 +1093,6 @@ code {
 .update-notice + .hud-right + .page,
 .update-notice ~ .page { padding-top: 14px; }
 
-/* ---- full screen ----
-   The footer goes and the board grows to the height of the screen. */
-
-.is-full .foot { display: none; }
-.is-full { --board-room: 250px; }
-.is-full .page { max-width: 1200px; }
-.is-full .card { padding: 14px; }
-
 @media (max-width: 480px) {
   :root {
     --glass-btn: 40px;
@@ -1097,6 +1112,9 @@ code {
   .final-stats { grid-template-columns: repeat(2, 1fr); }
   .mode-toggle.thirds .mode-btn { font-size: 0.78rem; padding: 8px 4px; }
   .tools .btn { padding: 7px 10px; font-size: 0.82rem; }
+  .play-top { gap: 6px; }
+  .play-top .btn-danger { padding: 6px 11px; font-size: 0.82rem; }
+  .play-top .hud-level { font-size: 0.82rem; }
   .join-form { grid-template-columns: 1fr 1fr; }
   .join-form .btn { grid-column: 1 / -1; }
   .code-big { font-size: 2rem; }

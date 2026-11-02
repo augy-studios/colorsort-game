@@ -96,9 +96,6 @@
                 <span data-icon="chevron"></span>
             </button>
             <div id="trayButtons" class="tray-buttons">
-                <button id="fullBtn" class="glass-btn" type="button" aria-label="Full screen" title="Full screen">
-                    <span data-icon="expand"></span>
-                </button>
                 <button id="partyBtn" class="glass-btn" type="button" aria-label="Play with others" title="Play with others">
                     <span data-icon="users"></span>
                 </button>
@@ -192,7 +189,14 @@
 
             <!-- A level in play. -->
             <section id="play" class="panel play" aria-label="Level" hidden>
-                <p id="hudLevel" class="hud-level"></p>
+                <!-- Leaving is the first thing in the box, in red, so nobody has to
+                     scroll past the board to find the way out. -->
+                <div class="play-top">
+                    <button id="exitBtn" class="btn btn-danger pill" type="button">
+                        <span data-icon="leave"></span><span id="exitLabel">Leave level</span>
+                    </button>
+                    <p id="hudLevel" class="hud-level"></p>
+                </div>
                 <div class="hud" role="group" aria-label="Level stats">
                     <div class="hud-stat" id="hudScoreBox"><span class="hud-label">Score</span><span id="hudScore" class="hud-value">0</span></div>
                     <div class="hud-stat"><span class="hud-label">Moves</span><span id="hudMoves" class="hud-value">0</span></div>
@@ -222,9 +226,6 @@
                     <span class="spacer"></span>
                     <button id="pauseBtn" class="btn btn-quiet pill" type="button" aria-label="Pause" aria-keyshortcuts="P">
                         <span data-icon="pause"></span>
-                    </button>
-                    <button id="exitBtn" class="btn btn-quiet pill" type="button">
-                        <span data-icon="leave"></span><span id="exitLabel">Leave level</span>
                     </button>
                 </div>
                 <p class="keys-legend">

@@ -10,7 +10,30 @@
 //
 // Input is js/board.js's: this file only says which column is under a point
 // on screen. Nothing here is rendered unless something changed: a frame is
-// drawn on demand and while a move animates, never in an idle loop.
+// drawn on demand and while something moves, never in an idle loop.
+//
+// How things move.
+//
+// Every animation is a job on a queue. A job names the columns it touches and
+// runs as a list of steps. Jobs on different columns run side by side; a job
+// waits for earlier jobs on any of its columns, and a column with work queued
+// behind it plays faster to catch up. Nothing snaps to its end unless a new
+// level is laid out. Once a column has no work left it is checked against the
+// view: a nut it uncovered shows its colour, a picked column rises, a finished
+// one gets its cork or cap.
+//
+// Water obeys gravity. Each layer of water is the inside of the tube cut
+// between two level planes in world space, at the heights that hold the
+// layers' volumes for the way the tube is tilted. So as a tube tips, its
+// water stays level, runs towards the mouth, and pours from the lip only once
+// it reaches it. A pour tips the tube just far enough for the water to reach
+// its lip, one layer at a time, and the tube it pours into fills layer by
+// layer. The cork goes on once the last layer is in.
+//
+// Nuts screw. Picking a bolt spins its top nuts up the thread one by one; off
+// the end of the bolt they stop turning and wait there. Moved, they glide to
+// above the other bolt without turning, stop, and spin down it one by one.
+// The cap goes on once the last nut is down.
 
 import * as THREE from "three";
 import { COLOURS, HIDDEN, SYMBOLS } from "./palette.js";
@@ -19,11 +42,26 @@ import { colourOfUnit, isComplete, isHiddenUnit, runLength } from "./puzzle.js";
 import { reducedMotion } from "./ui.js";
 
 const TILT = (14 * Math.PI) / 180; // the camera looks down this far
-const MOVE_MS = 520;
-const FAST_MS = 140;
 
-const WATER = { uh: 0.5, r: 0.34, liquid: 0.3 };
+const WATER = { uh: 0.5, r: 0.34, liquid: 0.3, floor: 0.04 };
 const BOLT = { uh: 0.4, nut: 0.4, shaft: 0.12 };
+
+const LIFT = 0.35; // how far a picked tube rises
+const PITCH = 0.3; // how far a nut climbs per turn of the thread
+const MAX_POUR = (112 * Math.PI) / 180; // the furthest a tube tips
+
+// Durations in milliseconds, at normal speed.
+const T = {
+  lift: 240,
+  travel: 460,
+  pourUnit: 520,
+  back: 460,
+  unscrew: 340,
+  glide: 420,
+  screw: 360,
+  capIn: 300,
+  fast: 150,
+};
 
 /* ---- colours, from the theme's own tokens ---- */
 
@@ -89,23 +127,137 @@ function threadTexture() {
   return texture;
 }
 
-const ease = (p) => (p < 0.5 ? 2 * p * p : 1 - (-2 * p + 2) ** 2 / 2);
+/* ---- easing ---- */
+
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
+const lerp = (a, b, t) => a + (b - a) * t;
+const easeInOut = (p) => (p < 0.5 ? 2 * p * p : 1 - (-2 * p + 2) ** 2 / 2);
+const easeOut = (p) => 1 - (1 - p) ** 3;
+const easeOutBack = (p) => 1 + 2.2 * (p - 1) ** 3 + 1.2 * (p - 1) ** 2;
+const smooth = (p) => p * p * (3 - 2 * p);
+// A turn of the nut that ends square, so a nut never comes to rest askew.
+const squareTurn = (rot) => Math.round(rot / (Math.PI / 3)) * (Math.PI / 3);
+
+/* ---- the inside of a tube: volumes and water levels ---- */
+
+// The inside is a hemisphere of radius L on the floor, then a cylinder up to
+// `top`, in the tube's own coordinates with y up its axis.
+class TubeVolume {
+  constructor(top) {
+    this.L = WATER.liquid;
+    this.y0 = WATER.floor;
+    this.c0 = this.y0 + this.L; // centre of the rounded end
+    this.top = top;
+    this.unit = Math.PI * this.L * this.L * WATER.uh; // one layer of water
+    this.hemi = (2 / 3) * Math.PI * this.L ** 3;
+    this.capacity = this.hemi + Math.PI * this.L * this.L * (top - this.c0);
+    this.N = 72;
+  }
+
+  radiusAt(y) {
+    if (y >= this.c0) return this.L;
+    const d = this.c0 - y;
+    return Math.sqrt(Math.max(0, this.L * this.L - d * d));
+  }
+
+  // Upright: the height of the water holding volume v.
+  uprightHeight(v) {
+    if (v <= 0) return this.y0;
+    if (v >= this.capacity) return this.top;
+    if (v > this.hemi) return this.c0 + (v - this.hemi) / (Math.PI * this.L * this.L);
+    // A cap of the sphere, height t: pi t^2 (3L - t) / 3.
+    let lo = 0;
+    let hi = this.L;
+    for (let k = 0; k < 30; k++) {
+      const t = (lo + hi) / 2;
+      if ((Math.PI * t * t * (3 * this.L - t)) / 3 < v) lo = t;
+      else hi = t;
+    }
+    return this.y0 + (lo + hi) / 2;
+  }
+
+  // Tipped by angle a: the volume below height h, measured from the tube's
+  // origin. Slices across the axis, each a circle cut by the level line.
+  volumeBelow(h, a) {
+    const s = Math.abs(Math.sin(a));
+    const c = Math.cos(a);
+    const ds = (this.top - this.y0) / this.N;
+    let v = 0;
+    for (let k = 0; k < this.N; k++) {
+      const y = this.y0 + (k + 0.5) * ds;
+      const r = this.radiusAt(y);
+      if (r <= 0) continue;
+      const centre = y * c;
+      let area;
+      if (s < 1e-6) area = centre < h ? Math.PI * r * r : 0;
+      else {
+        const d = (h - centre) / s;
+        if (d >= r) area = Math.PI * r * r;
+        else if (d <= -r) area = 0;
+        else area = r * r * Math.acos(-d / r) + d * Math.sqrt(r * r - d * d);
+      }
+      v += area * ds;
+    }
+    return v;
+  }
+
+  // Tipped by angle a: the height, from the tube's origin, of the level
+  // holding volume v.
+  levelFor(v, a) {
+    if (Math.abs(Math.sin(a)) < 1e-3) return this.uprightHeight(v) * Math.cos(a);
+    if (v <= 0) return -10;
+    const s = Math.abs(Math.sin(a));
+    const c = Math.cos(a);
+    const ys = [this.y0 * c - this.L, this.top * c - this.L * s, this.top * c + this.L * s, this.y0 * c + this.L];
+    let lo = Math.min(...ys);
+    let hi = Math.max(...ys);
+    for (let k = 0; k < 26; k++) {
+      const h = (lo + hi) / 2;
+      if (this.volumeBelow(h, a) < v) lo = h;
+      else hi = h;
+    }
+    return (lo + hi) / 2;
+  }
+
+  // The height of the lowest point of the mouth, tipped by angle a.
+  lipHeight(a) {
+    return this.top * Math.cos(a) - this.L * Math.abs(Math.sin(a));
+  }
+
+  // How far a tube holding volume v must tip for the water to reach its lip.
+  pourAngle(v) {
+    if (v >= this.capacity) return 0;
+    let lo = 0;
+    let hi = MAX_POUR;
+    if (this.volumeBelow(this.lipHeight(hi), hi) > v) return hi;
+    for (let k = 0; k < 22; k++) {
+      const a = (lo + hi) / 2;
+      if (this.volumeBelow(this.lipHeight(a), a) > v) lo = a;
+      else hi = a;
+    }
+    return (lo + hi) / 2;
+  }
+}
 
 export class Board3D {
   constructor(host) {
     this.host = host;
     this.view = null;
     this.mode = null;
-    this.groups = []; // one THREE.Group per column
-    this.units = []; // meshes per column, bottom first
-    this.tweens = [];
+    this.cols = []; // one record per column: its group, water or nuts
+    this.jobs = [];
+    this.fx = []; // pulses, outside the job queue
     this.frame = null;
+    this.lastTick = 0;
     this.focus = -1;
     this.layout = null;
+    this.pendingPulse = new Set();
+    this.extraPx = 0;
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setClearColor(0x000000, 0);
+    this.renderer.localClippingEnabled = true;
     this.canvas = this.renderer.domElement;
     this.canvas.className = "board-canvas";
     // The flat buttons underneath are what assistive tech reads.
@@ -128,12 +280,8 @@ export class Board3D {
       base: new THREE.CylinderGeometry(0.48, 0.52, 0.12, 40),
       knob: new THREE.SphereGeometry(BOLT.shaft * 1.05, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2),
       cap: new THREE.SphereGeometry(0.2, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2),
-      liquid: new THREE.CylinderGeometry(WATER.liquid, WATER.liquid, WATER.uh, 32, 1, true).translate(0, WATER.uh / 2, 0),
-      liquidBottom: this.roundedLiquid(),
-      liquidTop: new THREE.CircleGeometry(WATER.liquid, 32).rotateX(-Math.PI / 2),
       cork: new THREE.CylinderGeometry(WATER.r * 0.95, WATER.r * 0.8, 0.22, 24).translate(0, 0.11, 0),
       halo: new THREE.PlaneGeometry(1, 1),
-      stream: new THREE.CylinderGeometry(0.05, 0.05, 1, 10).translate(0, -0.5, 0),
     };
     this.threads = threadTexture();
     this.mats = {
@@ -156,17 +304,6 @@ export class Board3D {
     this.resize();
   }
 
-  roundedLiquid() {
-    const r = WATER.liquid;
-    const pts = [];
-    for (let k = 0; k <= 10; k++) {
-      const a = -Math.PI / 2 + (k / 10) * (Math.PI / 2);
-      pts.push(new THREE.Vector2(Math.max(0.0001, r * Math.cos(a)), r + r * Math.sin(a)));
-    }
-    pts.push(new THREE.Vector2(r, WATER.uh));
-    return new THREE.LatheGeometry(pts, 32);
-  }
-
   tubeGeometry(height, r) {
     const pts = [];
     for (let k = 0; k <= 10; k++) {
@@ -175,6 +312,29 @@ export class Board3D {
     }
     pts.push(new THREE.Vector2(r, height), new THREE.Vector2(r + 0.05, height + 0.03));
     return new THREE.LatheGeometry(pts, 32);
+  }
+
+  // The whole inside of a tube, which every layer of water is cut from. Its
+  // texture runs up the tube one symbol per layer's height, lined up with
+  // where the layers sit when the tube stands upright.
+  liquidGeometry(top) {
+    const L = WATER.liquid;
+    const y0 = WATER.floor;
+    const pts = [];
+    for (let k = 0; k <= 12; k++) {
+      const a = -Math.PI / 2 + (k / 12) * (Math.PI / 2);
+      pts.push(new THREE.Vector2(Math.max(0.0001, L * Math.cos(a)), y0 + L + L * Math.sin(a)));
+    }
+    pts.push(new THREE.Vector2(L, top));
+    const geo = new THREE.LatheGeometry(pts, 32);
+    // Upright, the first layer ends a third of a radius higher than a plain
+    // cylinder's would, for the rounded end holds less.
+    const vBase = y0 + L / 3;
+    const pos = geo.attributes.position;
+    const uv = geo.attributes.uv;
+    for (let k = 0; k < uv.count; k++) uv.setY(k, (pos.getY(k) - vBase) / WATER.uh);
+    uv.needsUpdate = true;
+    return geo;
   }
 
   refreshColors() {
@@ -194,14 +354,18 @@ export class Board3D {
     if (!this.colourMats.has(key)) {
       const colour = hidden ? HIDDEN : COLOURS[palette];
       const repeats = this.mode === "bolts" ? 6 : 4;
+      const map = symbolTexture(colour, repeats, hidden || this.view.symbols);
+      if (this.mode === "water") map.wrapS = map.wrapT = THREE.RepeatWrapping;
       const side = new THREE.MeshStandardMaterial({
-        map: symbolTexture(colour, repeats, hidden || this.view.symbols),
+        map,
         roughness: this.mode === "bolts" ? 0.45 : 0.25,
         metalness: this.mode === "bolts" ? 0.1 : 0,
         flatShading: this.mode === "bolts",
       });
       const top = new THREE.MeshStandardMaterial({ color: colour.hex, roughness: 0.35, flatShading: this.mode === "bolts" });
-      this.colourMats.set(key, { side, top });
+      // The surface of water seen from above: flat, a touch lighter.
+      const surface = new THREE.Color(colour.hex).lerp(new THREE.Color(0xffffff), 0.14);
+      this.colourMats.set(key, { side, top, surface });
     }
     return this.colourMats.get(key);
   }
@@ -210,9 +374,11 @@ export class Board3D {
 
   setup(view) {
     this.finishAll();
-    for (const g of this.groups) this.scene.remove(g);
-    this.groups = [];
-    this.units = [];
+    for (const fx of this.fx) fx.done();
+    this.fx = [];
+    this.pendingPulse.clear();
+    for (const col of this.cols) this.disposeColumn(col);
+    this.cols = [];
     for (const m of this.colourMats.values()) {
       m.side.map?.dispose();
       m.side.dispose();
@@ -226,10 +392,13 @@ export class Board3D {
     this.tubeGeo?.dispose();
     this.rimGeo?.dispose();
     this.shaftGeo?.dispose();
+    this.liquidGeo?.dispose();
     if (view.mode === "water") {
       const h = view.cap * WATER.uh + 0.3;
       this.tubeGeo = this.tubeGeometry(h, WATER.r);
       this.rimGeo = this.tubeGeometry(h, WATER.r + 0.035);
+      this.liquidGeo = this.liquidGeometry(h - 0.02);
+      this.volume = new TubeVolume(h - 0.02);
       this.columnHeight = h;
     } else {
       const h = view.cap * BOLT.uh + 0.35;
@@ -239,6 +408,9 @@ export class Board3D {
     }
     this.symbols = view.symbols;
     this.ensureColumns(view.cols.length);
+    view.cols.forEach((_, i) => this.settle(i, false));
+    this.dress(view);
+    this.draw();
   }
 
   makeColumn(i) {
@@ -251,7 +423,8 @@ export class Board3D {
       parts.rim = new THREE.Mesh(this.rimGeo, this.mats.rim);
       parts.rim.renderOrder = 1;
       parts.cork = new THREE.Mesh(this.geo.cork, this.mats.cork);
-      parts.cork.position.y = this.columnHeight - 0.08;
+      parts.cork.userData.y = this.columnHeight - 0.08;
+      parts.cork.position.y = parts.cork.userData.y;
       parts.cork.visible = false;
       group.add(parts.rim, parts.glass, parts.cork);
     } else {
@@ -261,7 +434,8 @@ export class Board3D {
       parts.knob = new THREE.Mesh(this.geo.knob, this.mats.metal);
       parts.knob.position.y = this.columnHeight;
       parts.cap = new THREE.Mesh(this.geo.cap, this.mats.metal);
-      parts.cap.position.y = this.cap * BOLT.uh;
+      parts.cap.userData.y = this.cap * BOLT.uh;
+      parts.cap.position.y = parts.cap.userData.y;
       parts.cap.visible = false;
       group.add(parts.base, parts.shaft, parts.knob, parts.cap);
     }
@@ -274,27 +448,30 @@ export class Board3D {
     parts.focus.position.copy(parts.halo.position);
     parts.focus.visible = false;
     group.add(parts.halo, parts.focus);
-    group.userData.parts = parts;
-    group.userData.lift = 0;
     this.scene.add(group);
-    return group;
+    // lift: how far a picked tube has risen. layers: water, bottom first.
+    // nuts: bottom first; raised: how many of the top ones wait above the bolt.
+    return { i, group, parts, home: new THREE.Vector3(), lift: 0, layers: [], nuts: [], raised: 0, doneShown: false };
+  }
+
+  disposeColumn(col) {
+    for (const layer of col.layers) this.disposeLayer(col, layer);
+    col.layers = [];
+    for (const nut of col.nuts) nut.parent?.remove(nut);
+    col.nuts = [];
+    col.parts.focus.geometry.dispose();
+    this.scene.remove(col.group);
   }
 
   ensureColumns(count) {
-    while (this.groups.length < count) {
-      this.groups.push(this.makeColumn(this.groups.length));
-      this.units.push([]);
-    }
-    while (this.groups.length > count) {
-      const g = this.groups.pop();
-      this.scene.remove(g);
-      this.units.pop();
-    }
+    if (this.cols.length !== count) this.finishAll();
+    while (this.cols.length < count) this.cols.push(this.makeColumn(this.cols.length));
+    while (this.cols.length > count) this.disposeColumn(this.cols.pop());
     this.relayout();
   }
 
   relayout() {
-    const count = this.groups.length;
+    const count = this.cols.length;
     if (!count) return;
     const w = Math.max(1, this.host.clientWidth);
     const h = Math.max(1, this.host.clientHeight);
@@ -302,12 +479,12 @@ export class Board3D {
     this.layout = layout;
     const worldW = layout.perRow * this.cell.w;
     const worldH = layout.rows * this.cell.h;
-    this.groups.forEach((g, i) => {
+    this.cols.forEach((col, i) => {
       const p = placeOf(i, count, layout);
       const x = (p.col - (p.inRow - 1) / 2) * this.cell.w;
       const y = worldH / 2 - (p.row + 1) * this.cell.h + 0.35;
-      g.userData.home = new THREE.Vector3(x, y, 0);
-      g.position.set(x, y + g.userData.lift, 0);
+      col.home.set(x, y, 0);
+      if (!this.busy(i)) this.place(col);
     });
     // Fit the camera round the board, with a margin for lifted pieces.
     const aspect = w / h;
@@ -315,9 +492,18 @@ export class Board3D {
     let halfH = (worldH / 2) * 1.1;
     if (halfW / halfH > aspect) halfH = halfW / aspect;
     else halfW = halfH * aspect;
+    // Above the top row there is room to draw into: a tube pouring into the
+    // top row, or nuts waiting above it, rise over the box's edge rather
+    // than being cut off by it.
+    const pxPerWorld = h / (2 * halfH);
+    const extraWorld = this.mode === "water" ? this.columnHeight + 0.3 : this.cap * BOLT.uh + 0.4;
+    this.extraPx = Math.round(Math.max(0, Math.min(extraWorld * pxPerWorld, h * 0.6)));
+    this.canvas.style.top = `${-this.extraPx}px`;
+    this.canvas.style.height = `${h + this.extraPx}px`;
+    this.renderer.setSize(w, h + this.extraPx, false);
     this.camera.left = -halfW;
     this.camera.right = halfW;
-    this.camera.top = halfH;
+    this.camera.top = halfH + this.extraPx / pxPerWorld;
     this.camera.bottom = -halfH;
     const d = 20;
     this.camera.position.set(0, Math.sin(TILT) * d, Math.cos(TILT) * d);
@@ -327,120 +513,196 @@ export class Board3D {
   }
 
   resize() {
-    const w = Math.max(1, this.host.clientWidth);
-    const h = Math.max(1, this.host.clientHeight);
-    this.renderer.setSize(w, h, false);
     this.relayout();
   }
 
-  /* ---- units ---- */
+  /* ---- pieces ---- */
 
   slotY(k) {
-    return this.mode === "water" ? 0.04 + k * WATER.uh : k * BOLT.uh;
+    return k * BOLT.uh;
   }
 
-  makeUnit(code, k) {
+  hoverY(j) {
+    return this.columnHeight + 0.18 + j * BOLT.uh;
+  }
+
+  makeNut(code) {
     const m = this.materialFor(code);
-    let mesh;
-    if (this.mode === "water") {
-      mesh = new THREE.Mesh(k === 0 ? this.geo.liquidBottom : this.geo.liquid, m.side);
-      const surface = new THREE.Mesh(this.geo.liquidTop, m.top);
-      surface.position.y = WATER.uh;
-      mesh.add(surface);
-      mesh.userData.surface = surface;
-    } else {
-      mesh = new THREE.Mesh(this.geo.nut, [m.side, m.top, m.top]);
-    }
+    const mesh = new THREE.Mesh(this.geo.nut, [m.side, m.top, m.top]);
     mesh.userData.code = code;
-    mesh.userData.slot = k;
+    mesh.userData.symbols = this.view.symbols;
     return mesh;
   }
 
-  paintUnit(mesh, code) {
+  paintNut(mesh, code) {
     if (mesh.userData.code === code && mesh.userData.symbols === this.view.symbols) return;
     mesh.userData.code = code;
     mesh.userData.symbols = this.view.symbols;
     const m = this.materialFor(code);
-    if (this.mode === "water") {
-      mesh.material = m.side;
-      mesh.userData.surface.material = m.top;
-    } else mesh.material = [m.side, m.top, m.top];
+    mesh.material = [m.side, m.top, m.top];
   }
 
-  rebuildColumn(i, codes) {
-    const g = this.groups[i];
-    for (const mesh of this.units[i]) g.remove(mesh);
-    this.units[i] = codes.map((code, k) => {
-      const mesh = this.makeUnit(code, k);
-      mesh.position.y = this.slotY(k);
-      g.add(mesh);
-      return mesh;
-    });
+  // A layer of water: the inside of the tube, cut between two level planes.
+  // Seen from outside it is the coloured side; looking down into the cut,
+  // the inside faces show as the flat surface of the water.
+  makeLayer(col, code, vol) {
+    const lower = new THREE.Plane(new THREE.Vector3(0, 1, 0), 10);
+    const upper = new THREE.Plane(new THREE.Vector3(0, -1, 0), -10);
+    const layer = { code, vol, lower, upper, front: null, back: null, symbols: null };
+    this.paintLayer(col, layer, code);
+    return layer;
+  }
+
+  paintLayer(col, layer, code) {
+    if (layer.front && layer.code === code && layer.symbols === this.view.symbols) return;
+    const m = this.materialFor(code);
+    const side = m.side.clone();
+    side.clippingPlanes = [layer.lower, layer.upper];
+    // The surface is cut at the layer's top only, so it covers every layer
+    // below; drawn after them (updateLiquid orders it), the top layer's
+    // colour is the one seen looking down into the water.
+    const surface = new THREE.MeshBasicMaterial({ color: m.surface, side: THREE.BackSide, clippingPlanes: [layer.upper] });
+    if (layer.front) {
+      layer.front.material.dispose();
+      layer.back.material.dispose();
+      layer.front.material = side;
+      layer.back.material = surface;
+    } else {
+      layer.front = new THREE.Mesh(this.liquidGeo, side);
+      layer.back = new THREE.Mesh(this.liquidGeo, surface);
+      col.group.add(layer.front, layer.back);
+    }
+    layer.code = code;
+    layer.symbols = this.view.symbols;
+  }
+
+  disposeLayer(col, layer) {
+    col.group.remove(layer.front, layer.back);
+    layer.front.material.dispose();
+    layer.back.material.dispose();
+  }
+
+  // Sets each layer's two planes at the levels its volume reaches, for the
+  // way the tube stands right now.
+  updateLiquid(col) {
+    if (this.mode !== "water") return;
+    const g = col.group;
+    const a = g.rotation.z;
+    const base = g.position.y;
+    let below = -1e3;
+    let total = 0;
+    for (const [k, layer] of col.layers.entries()) {
+      layer.back.renderOrder = 0.01 * (k + 1);
+      total += Math.max(0, layer.vol) * this.volume.unit;
+      const level = base + this.volume.levelFor(total, a);
+      layer.lower.constant = -below;
+      layer.upper.constant = level;
+      const show = layer.vol > 1e-3;
+      layer.front.visible = show;
+      layer.back.visible = show;
+      below = level;
+    }
+  }
+
+  surfaceY(col) {
+    const total = col.layers.reduce((v, l) => v + Math.max(0, l.vol), 0) * this.volume.unit;
+    return col.group.position.y + this.volume.levelFor(total, col.group.rotation.z);
+  }
+
+  // A column at rest: where it stands, and its pieces in their places.
+  place(col) {
+    const g = col.group;
+    g.position.set(col.home.x, col.home.y + col.lift, 0);
+    g.rotation.z = 0;
+    if (this.mode === "water") this.updateLiquid(col);
+    else {
+      const n = col.nuts.length;
+      col.nuts.forEach((mesh, k) => {
+        if (mesh.parent !== g) g.attach(mesh);
+        const j = k - (n - col.raised);
+        mesh.position.set(0, j >= 0 ? this.hoverY(j) : this.slotY(k), 0);
+      });
+    }
   }
 
   /* ---- drawing a view ---- */
 
   render(view, change) {
-    this.finishAll();
-    const symbolsChanged = this.symbols !== view.symbols;
     this.symbols = view.symbols;
     this.view = view;
-    this.ensureColumns(view.cols.length);
-    if (change && !reducedMotion() && this.animateChange(change)) {
-      // The rest of the view settles once the move lands.
-    }
-    view.cols.forEach((codes, i) => {
-      const meshes = this.units[i];
-      const moving = this.tweens.some((t) => t.column === i);
-      if (moving) return;
-      if (meshes.length !== codes.length) this.rebuildColumn(i, codes);
-      else {
-        meshes.forEach((mesh, k) => {
-          this.paintUnit(mesh, codes[k]);
-          if (symbolsChanged) mesh.userData.symbols = null;
-          mesh.userData.slot = k;
-          mesh.position.y = this.slotY(k);
-          mesh.position.x = 0;
-          mesh.rotation.set(0, 0, 0);
-          mesh.scale.set(1, 1, 1);
-          if (this.mode === "water") mesh.geometry = k === 0 ? this.geo.liquidBottom : this.geo.liquid;
-        });
-      }
+    if (view.cols.length !== this.cols.length) this.ensureColumns(view.cols.length);
+    if (change && !reducedMotion()) this.enqueueMove(change);
+    view.cols.forEach((_, i) => {
+      if (!this.busy(i)) this.settle(i, false);
     });
     this.dress(view);
     this.draw();
   }
 
-  // Lifting the picked column, haloes, finished caps.
+  // Brings an idle column in line with the view. Anything that needs to
+  // move to get there is queued, not snapped.
+  settle(i, animate) {
+    const col = this.cols[i];
+    const view = this.view;
+    if (!col || !view) return;
+    const codes = view.cols[i] ?? [];
+    const picked = view.selected === i;
+    if (this.mode === "water") {
+      if (col.layers.length !== codes.length) {
+        for (const layer of col.layers) this.disposeLayer(col, layer);
+        col.layers = codes.map((code) => this.makeLayer(col, code, 1));
+      } else
+        col.layers.forEach((layer, k) => {
+          this.paintLayer(col, layer, codes[k]);
+          layer.vol = 1;
+        });
+      const want = picked ? LIFT : 0;
+      if (Math.abs(col.lift - want) > 1e-3) this.enqueueLift(i, want);
+      else this.place(col);
+    } else {
+      if (col.nuts.length !== codes.length) {
+        for (const nut of col.nuts) nut.parent?.remove(nut);
+        col.nuts = codes.map((code) => {
+          const mesh = this.makeNut(code);
+          col.group.add(mesh);
+          return mesh;
+        });
+        col.raised = 0;
+      } else col.nuts.forEach((mesh, k) => this.paintNut(mesh, codes[k]));
+      const want = picked ? Math.min(codes.length, Math.max(1, view.liftCount ?? runLength(codes))) : 0;
+      if (col.raised !== want) {
+        if (col.raised > 0) this.enqueueScrew(i, "down");
+        if (want > 0) this.enqueueScrew(i, "up", want);
+      } else this.place(col);
+    }
+    // A finished column is closed once everything is in it.
+    const done = isComplete(codes, this.cap);
+    const lid = this.mode === "water" ? col.parts.cork : col.parts.cap;
+    if (done && this.mode === "bolts") lid.material = this.materialFor(codes[codes.length - 1]).top;
+    if (done && !col.doneShown) {
+      col.doneShown = true;
+      if (animate && !reducedMotion()) this.enqueueLid(i);
+      else {
+        lid.visible = true;
+        lid.position.y = lid.userData.y;
+        lid.scale.setScalar(1);
+        this.firePendingPulse(i);
+      }
+    } else if (!done) {
+      col.doneShown = false;
+      lid.visible = false;
+    } else this.firePendingPulse(i);
+  }
+
+  // Haloes and the keyboard's ring.
   dress(view) {
-    this.groups.forEach((g, i) => {
-      const p = g.userData.parts;
-      const codes = view.cols[i] ?? [];
-      const done = isComplete(codes, this.cap);
-      const picked = view.selected === i;
+    this.cols.forEach((col, i) => {
+      const p = col.parts;
       const hint = view.hint && (view.hint.a === i || view.hint.b === i);
       const target = view.target === i;
       p.halo.visible = Boolean(hint || target);
       p.halo.material = target ? this.mats.target : this.mats.hint;
       p.focus.visible = this.focus === i;
-      if (this.mode === "water") {
-        p.cork.visible = done;
-        g.userData.lift = picked ? 0.35 : 0;
-        if (!this.tweens.some((t) => t.group === g)) g.position.y = g.userData.home.y + g.userData.lift;
-      } else {
-        p.cap.visible = done;
-        if (done) p.cap.material = this.materialFor(codes[codes.length - 1]).top;
-        // A picked bolt's top nuts rise off the end of it.
-        const run = picked ? Math.max(1, view.liftCount ?? runLength(codes)) : 0;
-        const meshes = this.units[i];
-        if (!this.tweens.some((t) => t.column === i)) {
-          meshes.forEach((mesh, k) => {
-            const lifted = k >= meshes.length - run;
-            const over = this.columnHeight + 0.25 + (k - (meshes.length - run)) * BOLT.uh;
-            mesh.position.y = lifted ? over : this.slotY(k);
-          });
-        }
-      }
     });
   }
 
@@ -450,159 +712,497 @@ export class Board3D {
     this.draw();
   }
 
-  /* ---- animation ---- */
+  /* ---- the job queue ---- */
 
-  animateChange({ a, b, n, fast }) {
-    const from = this.units[a];
-    const to = this.units[b];
-    if (!from || !to || n <= 0 || from.length < n) return false;
-    const dur = fast ? FAST_MS : MOVE_MS;
-    return this.mode === "water" ? this.pour(a, b, n, dur, fast) : this.flyNuts(a, b, n, dur);
+  busy(i) {
+    return this.jobs.some((job) => job.cols.includes(i));
   }
 
-  flyNuts(a, b, n, dur) {
-    const ga = this.groups[a];
-    const gb = this.groups[b];
-    const moving = this.units[a].splice(this.units[a].length - n, n);
-    const base = this.units[b].length;
-    this.units[b].push(...moving);
-    const overA = this.columnHeight + 0.3;
-    const overB = this.columnHeight + 0.3;
-    moving.forEach((mesh, k) => {
-      const start = new THREE.Vector3();
-      mesh.getWorldPosition(start);
-      this.scene.attach(mesh);
-      const slot = base + k;
-      const end = gb.userData.home.clone().add(new THREE.Vector3(0, this.slotY(slot), 0));
-      const upA = ga.userData.home.clone().add(new THREE.Vector3(0, overA + k * BOLT.uh, 0));
-      const upB = gb.userData.home.clone().add(new THREE.Vector3(0, overB + k * BOLT.uh, 0));
-      this.tweens.push({
-        column: b,
-        start: performance.now() + (n - 1 - k) * (dur * 0.06),
-        dur,
-        step: (p) => {
-          let pos;
-          if (p < 0.3) pos = start.clone().lerp(upA, ease(p / 0.3));
-          else if (p < 0.7) {
-            const q = ease((p - 0.3) / 0.4);
-            pos = upA.clone().lerp(upB, q);
-            pos.y += Math.sin(q * Math.PI) * 0.35;
-          } else pos = upB.clone().lerp(end, ease((p - 0.7) / 0.3));
-          mesh.position.copy(pos);
-          mesh.rotation.y = p * Math.PI * 2;
-        },
-        done: () => {
-          mesh.rotation.y = 0;
-          gb.attach(mesh);
-          mesh.position.set(0, this.slotY(slot), 0);
-        },
-      });
-    });
-    this.tweens.push({ column: a, start: performance.now(), dur: dur * 0.3, step: () => {}, done: () => {} });
+  enqueue(cols, steps) {
+    this.jobs.push({ cols, steps, k: -1, t: 0 });
     this.kick();
+  }
+
+  canStart(job) {
+    for (const other of this.jobs) {
+      if (other === job) return true;
+      if (other.cols.some((c) => job.cols.includes(c))) return false;
+    }
     return true;
   }
 
-  pour(a, b, n, dur, fast) {
-    const ga = this.groups[a];
-    const gb = this.groups[b];
-    const leaving = this.units[a].splice(this.units[a].length - n, n);
-    const base = this.units[b].length;
-    const arriving = leaving.map((old, k) => {
-      const mesh = this.makeUnit(old.userData.code, base + k);
-      mesh.position.y = this.slotY(base + k);
-      mesh.scale.y = 0.0001;
-      gb.add(mesh);
-      return mesh;
-    });
-    this.units[b].push(...arriving);
-    const home = ga.userData.home.clone();
-    const right = gb.userData.home.x >= home.x;
-    const over = gb.userData.home.clone().add(new THREE.Vector3(right ? -0.55 : 0.55, this.columnHeight * 0.55 + 0.4, 0.4));
-    const tilt = right ? -1.15 : 1.15;
-    const colour = leaving[0] ? this.materialFor(leaving[0].userData.code).top : null;
-    const stream = colour && !fast ? new THREE.Mesh(this.geo.stream, colour) : null;
-    if (stream) {
-      stream.visible = false;
-      this.scene.add(stream);
+  // Runs a job's steps as far as its clock says. True once it is over.
+  advance(job) {
+    while (job.k < job.steps.length) {
+      const step = job.steps[job.k];
+      const dur = reducedMotion() ? 0 : step.dur ?? 0;
+      if (dur > 0 && job.t < dur) {
+        step.update?.(job.t / dur);
+        return false;
+      }
+      step.update?.(1);
+      step.done?.();
+      job.t -= dur;
+      job.k++;
+      if (job.k < job.steps.length) job.steps[job.k].init?.();
     }
-    const startLift = ga.userData.lift;
-    const moveOut = fast ? 0 : 0.3;
-    const moveBack = fast ? 1 : 0.78;
-    this.tweens.push({
-      column: a,
-      group: ga,
-      start: performance.now(),
-      dur,
-      step: (p) => {
-        if (!fast) {
-          let q;
-          if (p < moveOut) q = ease(p / moveOut);
-          else if (p < moveBack) q = 1;
-          else q = 1 - ease((p - moveBack) / (1 - moveBack));
-          const lifted = home.clone().add(new THREE.Vector3(0, startLift, 0));
-          ga.position.copy(lifted.lerp(over, q));
-          ga.rotation.z = tilt * q;
+    return true;
+  }
+
+  startJob(job) {
+    job.k = 0;
+    job.t = 0;
+    job.steps[0]?.init?.();
+  }
+
+  endJob(job) {
+    this.jobs.splice(this.jobs.indexOf(job), 1);
+    for (const c of job.cols) if (!this.busy(c)) this.settle(c, true);
+  }
+
+  // Plays every queued job to its end at once: for a new level, or columns
+  // coming or going.
+  finishAll() {
+    let guard = 0;
+    while (this.jobs.length && guard++ < 500) {
+      const job = this.jobs[0];
+      if (job.k < 0) this.startJob(job);
+      job.t = Infinity;
+      this.advance(job);
+      this.endJob(job);
+    }
+  }
+
+  /* ---- water ---- */
+
+  enqueueLift(i, want) {
+    const col = this.cols[i];
+    let from = 0;
+    const step = {
+      init: () => {
+        from = col.lift;
+        step.dur = (T.lift * Math.abs(want - from)) / LIFT;
+      },
+      update: (p) => {
+        col.lift = lerp(from, want, easeInOut(p));
+        this.place(col);
+      },
+    };
+    this.enqueue([i], [step]);
+  }
+
+  // Where the tube stands for its lip to be at q, tipped by angle a towards
+  // `side` (+1: it comes from the right and tips left).
+  pourPose(q, a, side) {
+    const rot = side * a;
+    const lx = -side * (WATER.r + 0.04);
+    const ly = this.columnHeight + 0.03;
+    const x = lx * Math.cos(rot) - ly * Math.sin(rot);
+    const y = lx * Math.sin(rot) + ly * Math.cos(rot);
+    return { pos: new THREE.Vector3(q.x - x, q.y - y, q.z), rot };
+  }
+
+  enqueuePour(a, b, n, fast) {
+    const ca = this.cols[a];
+    const cb = this.cols[b];
+    const ctx = { ok: false };
+    const prepare = () => {
+      ctx.ok = ca.layers.length >= n;
+      if (!ctx.ok) return;
+      ctx.leaving = ca.layers.slice(ca.layers.length - n).reverse(); // top first
+      ctx.arriving = ctx.leaving.map((layer) => {
+        const fresh = this.makeLayer(cb, layer.code, 0);
+        cb.layers.push(fresh);
+        return fresh;
+      });
+      this.updateLiquid(cb);
+    };
+    const finishPour = () => {
+      if (!ctx.ok) return;
+      for (const layer of ctx.leaving) {
+        this.disposeLayer(ca, layer);
+        ca.layers.splice(ca.layers.indexOf(layer), 1);
+      }
+      for (const layer of ctx.arriving) layer.vol = 1;
+      this.updateLiquid(cb);
+    };
+    // Volumes as the pour goes: one layer after another, each easing in and
+    // out, so the stream swells and thins between layers.
+    const flowAt = (p) => {
+      const t = p * n;
+      const j = Math.min(n - 1, Math.floor(t));
+      const q = t - j;
+      ctx.leaving.forEach((layer, k) => (layer.vol = k < j ? 0 : k === j ? 1 - smooth(q) : 1));
+      ctx.arriving.forEach((layer, k) => (layer.vol = k < j ? 1 : k === j ? smooth(q) : 0));
+      return p >= 1 ? 0 : 6 * q * (1 - q) / 1.5;
+    };
+
+    if (fast) {
+      let from = 0;
+      this.enqueue([a, b], [
+        {
+          dur: T.fast,
+          init: () => {
+            prepare();
+            from = ca.lift;
+          },
+          update: (p) => {
+            if (!ctx.ok) return;
+            flowAt(p);
+            ca.lift = from * (1 - p);
+            this.place(ca);
+            this.updateLiquid(cb);
+          },
+          done: finishPour,
+        },
+      ]);
+      return;
+    }
+
+    const side = ca.home.x > cb.home.x + 1e-3 ? 1 : ca.home.x < cb.home.x - 1e-3 ? -1 : cb.home.x <= 0 ? 1 : -1;
+    const lipTarget = () => new THREE.Vector3(cb.home.x + side * 0.05, cb.group.position.y + this.columnHeight + 0.12, 0.45);
+    const remaining = () => ca.layers.reduce((v, l) => v + Math.max(0, l.vol), 0) * this.volume.unit;
+    let liftFrom = 0;
+    let start = null;
+    let startRot = 0;
+    let angle = 0;
+    let stream = null;
+    let streamGeo = null;
+
+    const lift = {
+      init: () => {
+        liftFrom = ca.lift;
+        lift.dur = (T.lift * Math.max(0, LIFT - liftFrom)) / LIFT;
+      },
+      update: (p) => {
+        ca.lift = lerp(liftFrom, LIFT, easeInOut(p));
+        this.place(ca);
+      },
+    };
+    const travel = {
+      init: () => {
+        prepare();
+        start = ca.group.position.clone();
+        if (!ctx.ok) {
+          travel.dur = 0;
+          return;
         }
-        const pour = Math.min(1, Math.max(0, (p - moveOut) / (moveBack - moveOut)));
-        leaving.forEach((mesh) => (mesh.scale.y = Math.max(0.0001, 1 - pour)));
-        arriving.forEach((mesh) => (mesh.scale.y = Math.max(0.0001, pour)));
-        if (stream) {
-          stream.visible = pour > 0 && pour < 1;
-          const mouth = new THREE.Vector3(0, this.columnHeight, 0);
-          ga.localToWorld(mouth);
-          const into = gb.userData.home.clone().add(new THREE.Vector3(0, this.slotY(base + n) + 0.05, 0));
-          // Straight down from the height of the mouth into the target.
-          stream.position.set(into.x, mouth.y, into.z);
-          stream.scale.set(1, Math.max(0.01, mouth.y - into.y), 1);
+        angle = this.volume.pourAngle(remaining());
+        const end = this.pourPose(lipTarget(), angle, side);
+        travel.dur = T.travel + Math.min(320, start.distanceTo(end.pos) * 70);
+      },
+      update: (p) => {
+        if (!ctx.ok) return;
+        const end = this.pourPose(lipTarget(), angle, side);
+        const e = easeInOut(p);
+        const pos = start.clone().lerp(end.pos, e);
+        pos.y += Math.sin(e * Math.PI) * 0.35;
+        ca.group.position.copy(pos);
+        // It starts to tip once under way, and is tipped as it arrives.
+        ca.group.rotation.z = end.rot * easeInOut(clamp01((p - 0.3) / 0.7));
+        this.updateLiquid(ca);
+      },
+    };
+    const pour = {
+      init: () => {
+        if (!ctx.ok) {
+          pour.dur = 0;
+          return;
         }
+        pour.dur = T.pourUnit * n;
+        stream = new THREE.Mesh(new THREE.BufferGeometry(), this.materialFor(ctx.leaving[0].code).top);
+        stream.visible = false;
+        this.scene.add(stream);
+      },
+      update: (p) => {
+        if (!ctx.ok) return;
+        const flow = flowAt(p);
+        // Tipped just as far as the water left needs to reach the lip, and
+        // never back while it pours.
+        angle = Math.max(angle, this.volume.pourAngle(remaining()));
+        const pose = this.pourPose(lipTarget(), angle, side);
+        ca.group.position.copy(pose.pos);
+        ca.group.rotation.z = pose.rot;
+        this.updateLiquid(ca);
+        this.updateLiquid(cb);
+        // The stream: off the lip and down through the mouth below.
+        streamGeo?.dispose();
+        streamGeo = null;
+        if (flow > 0.04) {
+          ca.group.updateMatrixWorld();
+          const lip = ca.group.localToWorld(new THREE.Vector3(-side * (WATER.r + 0.02), this.columnHeight + 0.02, 0));
+          const mouthY = cb.group.position.y + this.columnHeight;
+          const floor = Math.min(this.surfaceY(cb), mouthY - 0.08);
+          const curve = new THREE.CatmullRomCurve3([
+            lip,
+            lip.clone().add(new THREE.Vector3(-side * 0.04, -0.05, -0.08)),
+            new THREE.Vector3(cb.home.x + side * 0.02, mouthY, 0.08),
+            new THREE.Vector3(cb.home.x, floor, 0),
+          ]);
+          streamGeo = new THREE.TubeGeometry(curve, 24, 0.012 + 0.045 * Math.min(1, flow), 8, false);
+          stream.geometry = streamGeo;
+          stream.visible = true;
+        } else stream.visible = false;
       },
       done: () => {
-        for (const mesh of leaving) ga.remove(mesh);
         if (stream) this.scene.remove(stream);
-        ga.rotation.z = 0;
-        ga.position.copy(home).add(new THREE.Vector3(0, ga.userData.lift, 0));
-        arriving.forEach((mesh) => (mesh.scale.y = 1));
+        streamGeo?.dispose();
+        streamGeo = null;
+        stream = null;
+        finishPour();
       },
-    });
-    this.tweens.push({ column: b, start: performance.now(), dur, step: () => {}, done: () => {} });
-    this.kick();
-    return true;
+    };
+    const back = {
+      init: () => {
+        start = ca.group.position.clone();
+        startRot = ca.group.rotation.z;
+        ca.lift = 0;
+        back.dur = (ctx.ok ? T.back : T.lift) + Math.min(320, start.distanceTo(ca.home) * 70);
+      },
+      update: (p) => {
+        const e = easeInOut(p);
+        const pos = start.clone().lerp(ca.home, e);
+        pos.y += Math.sin(e * Math.PI) * 0.25;
+        ca.group.position.copy(pos);
+        // Upright first, then down into its place.
+        ca.group.rotation.z = startRot * (1 - easeInOut(clamp01(p / 0.55)));
+        this.updateLiquid(ca);
+      },
+      done: () => this.place(ca),
+    };
+    this.enqueue([a, b], [lift, travel, pour, back]);
   }
+
+  /* ---- bolts ---- */
+
+  // Spins a column's nuts up off the top of the bolt (`up`, the top `count`
+  // nuts, top first) or back down onto it (`down`, the lowest first). They
+  // turn only while on the thread.
+  screwSteps(col, dir, count, { speed = 1 } = {}) {
+    let plan = [];
+    let D = 0;
+    let S = 0;
+    const step = {
+      init: () => {
+        const n = col.nuts.length;
+        plan = [];
+        // A nut uncovered while the column was busy shows its colour now.
+        const codes = this.view?.cols[col.i];
+        if (codes && codes.length === n) col.nuts.forEach((mesh, k) => this.paintNut(mesh, codes[k]));
+        if (dir === "up") {
+          const c = Math.min(count, n);
+          for (let m = 0; m < c; m++) {
+            const k = n - 1 - m;
+            plan.push({ mesh: col.nuts[k], to: this.hoverY(k - (n - c)) });
+          }
+        } else {
+          for (let j = 0; j < col.raised; j++) {
+            const k = n - col.raised + j;
+            plan.push({ mesh: col.nuts[k], to: this.slotY(k) });
+          }
+        }
+        for (const item of plan) {
+          if (item.mesh.parent !== col.group) col.group.attach(item.mesh);
+          item.from = item.mesh.position.y;
+          item.rot0 = item.mesh.rotation.y;
+          const threaded = Math.abs(Math.min(item.to, this.columnHeight) - Math.min(item.from, this.columnHeight));
+          const turn = (threaded / PITCH) * Math.PI * 2 * (dir === "up" ? 1 : -1);
+          item.rot1 = squareTurn(item.rot0 + turn);
+        }
+        D = T.unscrew / speed;
+        S = D * 0.6;
+        step.dur = plan.length ? D + S * (plan.length - 1) : 0;
+      },
+      update: (p) => {
+        const t = p * step.dur;
+        plan.forEach((item, m) => {
+          const q = step.dur ? clamp01((t - m * S) / D) : 1;
+          const y = lerp(item.from, item.to, easeInOut(q));
+          item.mesh.position.set(0, y, 0);
+          // How far along the thread it is, for how far it has turned.
+          const a = Math.min(item.from, this.columnHeight);
+          const b = Math.min(item.to, this.columnHeight);
+          const f = Math.abs(b - a) < 1e-6 ? 1 : clamp01((Math.min(y, this.columnHeight) - a) / (b - a));
+          item.mesh.rotation.y = lerp(item.rot0, item.rot1, f);
+        });
+      },
+      done: () => {
+        col.raised = dir === "up" ? plan.length : 0;
+      },
+    };
+    return step;
+  }
+
+  enqueueScrew(i, dir, count = 0) {
+    this.enqueue([i], [this.screwSteps(this.cols[i], dir, count)]);
+  }
+
+  enqueueNuts(a, b, n, fast) {
+    const ca = this.cols[a];
+    const cb = this.cols[b];
+    const ctx = { ok: false, moving: [], starts: [], base: 0 };
+    const speed = fast ? 3 : 1;
+    const up = this.screwSteps(ca, "up", n, { speed });
+    const ready = {
+      init: () => {
+        ctx.ok = ca.nuts.length >= n;
+        // Raised already from being picked: none of this is needed.
+        ready.skip = !ctx.ok || ca.raised >= n;
+        if (!ready.skip && ca.raised > 0) {
+          // Raised by a different count: back down first.
+          ready.down = this.screwSteps(ca, "down", 0, { speed });
+          ready.down.init();
+        } else ready.down = null;
+        ready.dur = ready.down?.dur ?? 0;
+      },
+      update: (p) => ready.down?.update(p),
+      done: () => ready.down?.done(),
+    };
+    const raise = {
+      init: () => {
+        if (ready.skip) {
+          raise.dur = 0;
+          return;
+        }
+        up.init();
+        raise.dur = up.dur;
+      },
+      update: (p) => !ready.skip && up.update(p),
+      done: () => !ready.skip && up.done(),
+    };
+    const glide = {
+      init: () => {
+        if (!ctx.ok) {
+          glide.dur = 0;
+          return;
+        }
+        const len = ca.nuts.length;
+        ctx.moving = ca.nuts.slice(len - n); // bottom first
+        ctx.left = ca.raised - n; // raised but staying, if b had less room
+        ctx.starts = ctx.moving.map((mesh) => {
+          this.scene.attach(mesh);
+          return mesh.position.clone();
+        });
+        ctx.ends = ctx.moving.map((_, j) => cb.home.clone().add(new THREE.Vector3(0, this.hoverY(j), 0)));
+        glide.dur = (fast ? T.fast : T.glide + Math.min(320, ctx.starts[0].distanceTo(ctx.ends[0]) * 70));
+      },
+      update: (p) => {
+        if (!ctx.ok) return;
+        const e = easeInOut(p);
+        ctx.moving.forEach((mesh, j) => {
+          const pos = ctx.starts[j].clone().lerp(ctx.ends[j], e);
+          pos.y += Math.sin(e * Math.PI) * 0.3;
+          // Forward, in front of any bolt on the way.
+          pos.z += Math.sin(e * Math.PI) * 0.7;
+          mesh.position.copy(pos);
+        });
+      },
+      done: () => {
+        if (!ctx.ok) return;
+        ca.nuts.splice(ca.nuts.length - n, n);
+        ca.raised = Math.max(0, ctx.left);
+        ctx.base = cb.nuts.length;
+        for (const mesh of ctx.moving) cb.group.attach(mesh);
+        cb.nuts.push(...ctx.moving);
+        cb.raised = n;
+      },
+    };
+    const downB = this.screwSteps(cb, "down", 0, { speed });
+    const downA = this.screwSteps(ca, "down", 0, { speed });
+    const land = {
+      init: () => {
+        if (!ctx.ok) {
+          land.dur = 0;
+          return;
+        }
+        downB.init();
+        downA.init();
+        land.dur = Math.max(downB.dur, downA.dur);
+      },
+      update: (p) => {
+        if (!ctx.ok) return;
+        const t = p * land.dur;
+        downB.update(downB.dur ? clamp01(t / downB.dur) : 1);
+        downA.update(downA.dur ? clamp01(t / downA.dur) : 1);
+      },
+      done: () => {
+        if (!ctx.ok) return;
+        downB.done();
+        downA.done();
+      },
+    };
+    this.enqueue([a, b], [ready, raise, glide, land]);
+  }
+
+  /* ---- both ---- */
+
+  enqueueMove({ a, b, n, fast }) {
+    if (!this.cols[a] || !this.cols[b] || a === b || !(n > 0)) return;
+    if (this.mode === "water") this.enqueuePour(a, b, n, Boolean(fast));
+    else this.enqueueNuts(a, b, n, Boolean(fast));
+  }
+
+  // The cork or cap goes on: down from above, settling into place.
+  enqueueLid(i) {
+    const col = this.cols[i];
+    const lid = this.mode === "water" ? col.parts.cork : col.parts.cap;
+    this.enqueue([i], [
+      {
+        dur: T.capIn,
+        init: () => {
+          lid.visible = true;
+        },
+        update: (p) => {
+          lid.position.y = lid.userData.y + (1 - easeOutBack(p)) * 0.6;
+          lid.scale.setScalar(lerp(0.6, 1, easeOut(p)));
+        },
+        done: () => {
+          lid.position.y = lid.userData.y;
+          lid.scale.setScalar(1);
+          this.firePendingPulse(i);
+        },
+      },
+    ]);
+  }
+
+  /* ---- pulses ---- */
 
   pulse(cols, kind) {
     if (reducedMotion()) return;
     for (const i of cols) {
-      const g = this.groups[i];
-      if (!g) continue;
-      const home = g.userData.home.clone();
-      this.tweens.push({
-        start: performance.now(),
-        dur: kind === "bad" ? 320 : 420,
-        pulse: true,
-        step: (p) => {
-          if (kind === "bad") g.position.x = home.x + Math.sin(p * Math.PI * 6) * 0.08 * (1 - p);
-          else g.scale.setScalar(1 + Math.sin(p * Math.PI) * 0.06);
-        },
-        done: () => {
-          g.position.x = home.x;
-          g.scale.setScalar(1);
-        },
-      });
+      if (!this.cols[i]) continue;
+      // A finished column pops once it is closed, not while still filling.
+      if (kind === "done" && this.busy(i)) this.pendingPulse.add(i);
+      else this.startPulse(i, kind);
     }
+  }
+
+  firePendingPulse(i) {
+    if (!this.pendingPulse.delete(i)) return;
+    this.startPulse(i, "done");
+  }
+
+  startPulse(i, kind) {
+    const col = this.cols[i];
+    const g = col.group;
+    const start = performance.now();
+    const dur = kind === "bad" ? 320 : 420;
+    this.fx.push({
+      start,
+      dur,
+      step: (p) => {
+        if (kind === "bad") g.position.x = col.home.x + Math.sin(p * Math.PI * 6) * 0.08 * (1 - p);
+        else g.scale.setScalar(1 + Math.sin(p * Math.PI) * 0.06);
+      },
+      done: () => {
+        if (kind === "bad") g.position.x = col.home.x;
+        g.scale.setScalar(1);
+      },
+    });
     this.kick();
   }
 
-  // Ends every animation at its last frame, so a new move starts from where
-  // the pieces really are.
-  finishAll() {
-    const all = this.tweens;
-    this.tweens = [];
-    for (const t of all) {
-      t.step(1);
-      t.done();
-    }
-  }
+  /* ---- frames ---- */
 
   kick() {
     if (this.frame === null) this.frame = requestAnimationFrame((now) => this.tick(now));
@@ -610,20 +1210,34 @@ export class Board3D {
 
   tick(now) {
     this.frame = null;
-    const live = [];
-    for (const t of this.tweens) {
-      const p = Math.max(0, Math.min(1, (now - t.start) / t.dur));
-      t.step(p);
-      if (p >= 1) t.done();
-      else live.push(t);
+    // A frame after a long gap (a hidden tab) moves on by one frame's worth.
+    const dt = this.lastTick ? Math.min(50, Math.max(0, now - this.lastTick)) : 16;
+    this.lastTick = now;
+
+    for (const job of [...this.jobs]) {
+      if (!this.jobs.includes(job)) continue;
+      if (job.k < 0) {
+        if (!this.canStart(job)) continue;
+        this.startJob(job);
+      }
+      // Work queued behind a job plays it faster, to catch up.
+      const behind = this.jobs.filter((o) => o !== job && o.k < 0 && o.cols.some((c) => job.cols.includes(c))).length;
+      job.t += dt * Math.min(3, 1 + behind * 0.8);
+      if (this.advance(job)) this.endJob(job);
     }
-    const finished = live.length < this.tweens.length;
-    this.tweens = live;
+
+    const live = [];
+    for (const fx of this.fx) {
+      const p = clamp01((now - fx.start) / fx.dur);
+      fx.step(p);
+      if (p >= 1) fx.done();
+      else live.push(fx);
+    }
+    this.fx = live;
+
     this.renderer.render(this.scene, this.camera);
-    // Once a move lands, the columns it touched are checked against the
-    // view: a nut it uncovered shows its colour, and lifts settle.
-    if (finished && !live.length && this.view) this.render(this.view, null);
-    else if (this.tweens.length) this.kick();
+    if (this.jobs.length || this.fx.length) this.kick();
+    else this.lastTick = 0;
   }
 
   draw() {
@@ -640,8 +1254,8 @@ export class Board3D {
     if (!this.raycaster.ray.intersectPlane(this.plane, hit)) return null;
     let best = null;
     let bestD = Infinity;
-    this.groups.forEach((g, i) => {
-      const home = g.userData.home;
+    this.cols.forEach((col, i) => {
+      const home = col.home;
       const dx = Math.abs(hit.x - home.x);
       const bottom = home.y - 0.4;
       const top = home.y + this.cell.h - 0.2;

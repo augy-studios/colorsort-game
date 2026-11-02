@@ -7,7 +7,7 @@ import { initLeaderboard, openLeaderboard } from "./leaderboard.js";
 import { getSettings, initSettings, openSettings } from "./settings.js";
 import { initParty, inParty, openParty, resumeParty } from "./party.js";
 import { ReplayPlayer, replayFromLocation } from "./replay.js";
-import { initTrayAndFullscreen } from "./tray.js";
+import { initTray } from "./tray.js";
 import { initQueue } from "./queue.js";
 
 /* Theme modal, per uwuapps-theme.md section 6. */
@@ -134,7 +134,7 @@ function boot() {
   updateThemeButtonIcon();
   buildThemeModal();
   wireModals();
-  initTrayAndFullscreen();
+  initTray();
   initLeaderboard();
   initSettings();
   initQueue();

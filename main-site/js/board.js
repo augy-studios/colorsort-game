@@ -124,14 +124,24 @@ class FlatBoard {
     view.cols.forEach((col, i) => {
       const btn = this.buttons[i];
       const done = isComplete(col, view.cap);
-      const units = col
-        .map((u, k) => {
-          const c = isHiddenUnit(u) ? colourOf(-1) : COLOURS[view.palette[colourOfUnit(u)]];
-          const lifted = view.selected === i && k >= col.length - view.liftCount ? " lifted" : "";
-          return `<span class="funit${lifted}" style="--c:${c.hex};--ci:${c.ink}">${symbols || isHiddenUnit(u) ? symbolSvg(c.symbol) : ""}</span>`;
-        })
-        .join("");
-      btn.innerHTML = `<span class="fcol-body">${units}</span>`;
+      // Updated in place, not redrawn, so lifting and setting down slide.
+      let body = btn.firstElementChild;
+      if (!body) {
+        body = document.createElement("span");
+        body.className = "fcol-body";
+        btn.append(body);
+      }
+      const sig = `${col.join(",")}|${symbols ? 1 : 0}|${view.palette.join(",")}`;
+      if (body.dataset.sig !== sig) {
+        body.dataset.sig = sig;
+        body.innerHTML = col
+          .map((u) => {
+            const c = isHiddenUnit(u) ? colourOf(-1) : COLOURS[view.palette[colourOfUnit(u)]];
+            return `<span class="funit" style="--c:${c.hex};--ci:${c.ink}">${symbols || isHiddenUnit(u) ? symbolSvg(c.symbol) : ""}</span>`;
+          })
+          .join("");
+      }
+      [...body.children].forEach((el, k) => el.classList.toggle("lifted", view.selected === i && k >= col.length - view.liftCount));
       btn.classList.toggle("selected", view.selected === i);
       btn.classList.toggle("done", done);
       btn.classList.toggle("hint", Boolean(view.hint && (view.hint.a === i || view.hint.b === i)));
