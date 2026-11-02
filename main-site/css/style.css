@@ -485,20 +485,31 @@ body {
   color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
+/* Points earned: they appear under the score box and rise into the number
+   (js/game.js measures --rise), which then counts up and gives a little
+   bump as they land. */
 .score-pop {
   position: absolute;
   left: 50%;
-  top: 2px;
-  transform: translateX(-50%);
+  top: calc(100% + 10px);
+  z-index: 3;
   color: var(--brand-ink);
-  font-size: 1rem;
+  font-size: 1.05rem;
+  white-space: nowrap;
   pointer-events: none;
-  animation: score-pop 0.9s ease forwards;
+  animation: score-pop 0.62s cubic-bezier(0.45, 0, 0.3, 1) forwards;
 }
 @keyframes score-pop {
-  from { opacity: 1; transform: translate(-50%, 0); }
-  to { opacity: 0; transform: translate(-50%, -26px); }
+  0% { opacity: 0; transform: translate(-50%, 8px) scale(0.85); }
+  18% { opacity: 1; transform: translate(-50%, 0) scale(1.08); }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, var(--rise, -40px)) scale(0.6); }
 }
+.hud-stat.score-bump .hud-value { animation: score-bump 0.32s ease; }
+@keyframes score-bump {
+  40% { transform: scale(1.18); color: var(--brand-ink); }
+}
+.hud-value { display: inline-block; }
 
 .caption-row {
   width: 100%;
@@ -1123,6 +1134,7 @@ code {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .score-pop, .hud-stat.score-bump .hud-value { animation-duration: 0.001ms !important; }
   .hud-right, .tray, .tray-tab, .tray-tab svg, .tray-buttons > *, .glass-btn, .page, .brand {
     transition-duration: 0.001ms !important;
     transition-delay: 0s !important;

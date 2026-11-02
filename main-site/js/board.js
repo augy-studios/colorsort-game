@@ -285,6 +285,11 @@ export class Board {
     if (this.is3d) this.three.render(view, change);
   }
 
+  // Resolves once the board has finished animating the last move.
+  whenIdle() {
+    return this.is3d ? this.three.idle() : Promise.resolve();
+  }
+
   pulse(cols, kind) {
     this.flat.pulse(cols, kind);
     if (this.is3d) this.three.pulse(cols, kind);

@@ -1070,68 +1070,100 @@ export class Board3D {
       update: (p) => !ready.skip && up.update(p),
       done: () => !ready.skip && up.done(),
     };
-    const glide = {
+    // One nut at a time, the topmost first: it glides, not turning, to
+    // above the other bolt, stops, and spins down it. The next one sets off
+    // once the one before has started down. Any raised nuts that stay (the
+    // other bolt had less room) spin back down once the last has gone.
+    const transfer = {
       init: () => {
         if (!ctx.ok) {
-          glide.dur = 0;
+          transfer.dur = 0;
           return;
         }
         const len = ca.nuts.length;
-        ctx.moving = ca.nuts.slice(len - n); // bottom first
-        ctx.left = ca.raised - n; // raised but staying, if b had less room
-        ctx.starts = ctx.moving.map((mesh) => {
+        const base = cb.nuts.length;
+        const colTop = cb.home.y + this.columnHeight;
+        const hover = cb.home.clone().add(new THREE.Vector3(0, this.hoverY(0), 0));
+        const D = T.screw / speed;
+        const first = new THREE.Vector3();
+        ca.nuts[len - 1].getWorldPosition(first);
+        const G = fast ? T.fast : T.glide + Math.min(320, first.distanceTo(hover) * 70);
+        const gap = G + D * (fast ? 0.3 : 0.45);
+        ctx.base = base;
+        ctx.moving = ca.nuts.slice(len - n).reverse(); // topmost first
+        ctx.plan = ctx.moving.map((mesh, m) => {
+          const start = new THREE.Vector3();
+          mesh.getWorldPosition(start);
           this.scene.attach(mesh);
-          return mesh.position.clone();
+          const slotY = cb.home.y + this.slotY(base + m);
+          const threaded = colTop - slotY;
+          const rot0 = mesh.rotation.y;
+          return { mesh, start, slotY, t0: m * gap, rot0, rot1: squareTurn(rot0 - (threaded / PITCH) * Math.PI * 2) };
         });
-        ctx.ends = ctx.moving.map((_, j) => cb.home.clone().add(new THREE.Vector3(0, this.hoverY(j), 0)));
-        glide.dur = (fast ? T.fast : T.glide + Math.min(320, ctx.starts[0].distanceTo(ctx.ends[0]) * 70));
+        // Raised nuts staying on this bolt, bottom first.
+        const stayFrom = len - Math.max(ca.raised, n);
+        const tLeft = (n - 1) * gap + G;
+        ctx.staying = ca.nuts.slice(stayFrom, len - n).map((mesh, j) => {
+          const k = stayFrom + j;
+          const from = mesh.position.y;
+          const threaded = this.columnHeight - Math.min(this.slotY(k), this.columnHeight);
+          const rot0 = mesh.rotation.y;
+          return { mesh, from, to: this.slotY(k), t0: tLeft + j * D * 0.6, rot0, rot1: squareTurn(rot0 - (threaded / PITCH) * Math.PI * 2) };
+        });
+        ctx.G = G;
+        ctx.D = D;
+        ctx.hover = hover;
+        ctx.colTop = colTop;
+        const lastStay = ctx.staying.length ? ctx.staying[ctx.staying.length - 1].t0 + D : 0;
+        transfer.dur = Math.max((n - 1) * gap + G + D, lastStay);
       },
       update: (p) => {
         if (!ctx.ok) return;
-        const e = easeInOut(p);
-        ctx.moving.forEach((mesh, j) => {
-          const pos = ctx.starts[j].clone().lerp(ctx.ends[j], e);
-          pos.y += Math.sin(e * Math.PI) * 0.3;
-          // Forward, in front of any bolt on the way.
-          pos.z += Math.sin(e * Math.PI) * 0.7;
-          mesh.position.copy(pos);
-        });
+        const t = p * transfer.dur;
+        const { G, D, hover, colTop } = ctx;
+        for (const item of ctx.plan) {
+          const local = t - item.t0;
+          if (local <= 0) {
+            item.mesh.position.copy(item.start);
+          } else if (local < G) {
+            const e = easeInOut(local / G);
+            const pos = item.start.clone().lerp(hover, e);
+            pos.y += Math.sin(e * Math.PI) * 0.3;
+            // Forward, in front of any bolt on the way.
+            pos.z += Math.sin(e * Math.PI) * 0.7;
+            item.mesh.position.copy(pos);
+            item.mesh.rotation.y = item.rot0;
+          } else {
+            const q = clamp01((local - G) / D);
+            const y = lerp(hover.y, item.slotY, easeInOut(q));
+            item.mesh.position.set(hover.x, y, 0);
+            const f = colTop - item.slotY < 1e-6 ? 1 : clamp01((colTop - Math.min(y, colTop)) / (colTop - item.slotY));
+            item.mesh.rotation.y = lerp(item.rot0, item.rot1, f);
+          }
+        }
+        for (const item of ctx.staying) {
+          const q = clamp01((t - item.t0) / D);
+          const y = lerp(item.from, item.to, easeInOut(q));
+          item.mesh.position.set(0, y, 0);
+          const top = this.columnHeight;
+          const a = Math.min(item.from, top);
+          const f = Math.abs(a - item.to) < 1e-6 ? 1 : clamp01((a - Math.min(y, top)) / (a - item.to));
+          item.mesh.rotation.y = lerp(item.rot0, item.rot1, f);
+        }
       },
       done: () => {
         if (!ctx.ok) return;
         ca.nuts.splice(ca.nuts.length - n, n);
-        ca.raised = Math.max(0, ctx.left);
-        ctx.base = cb.nuts.length;
-        for (const mesh of ctx.moving) cb.group.attach(mesh);
+        ca.raised = 0;
+        ctx.moving.forEach((mesh, m) => {
+          cb.group.attach(mesh);
+          mesh.position.set(0, this.slotY(ctx.base + m), 0);
+        });
         cb.nuts.push(...ctx.moving);
-        cb.raised = n;
+        cb.raised = 0;
       },
     };
-    const downB = this.screwSteps(cb, "down", 0, { speed });
-    const downA = this.screwSteps(ca, "down", 0, { speed });
-    const land = {
-      init: () => {
-        if (!ctx.ok) {
-          land.dur = 0;
-          return;
-        }
-        downB.init();
-        downA.init();
-        land.dur = Math.max(downB.dur, downA.dur);
-      },
-      update: (p) => {
-        if (!ctx.ok) return;
-        const t = p * land.dur;
-        downB.update(downB.dur ? clamp01(t / downB.dur) : 1);
-        downA.update(downA.dur ? clamp01(t / downA.dur) : 1);
-      },
-      done: () => {
-        if (!ctx.ok) return;
-        downB.done();
-        downA.done();
-      },
-    };
-    this.enqueue([a, b], [ready, raise, glide, land]);
+    this.enqueue([a, b], [ready, raise, transfer]);
   }
 
   /* ---- both ---- */
@@ -1238,6 +1270,14 @@ export class Board3D {
     this.renderer.render(this.scene, this.camera);
     if (this.jobs.length || this.fx.length) this.kick();
     else this.lastTick = 0;
+    if (!this.jobs.length && this.idleWaiters?.length) for (const resolve of this.idleWaiters.splice(0)) resolve();
+  }
+
+  // Resolves once every queued move has played out.
+  idle() {
+    if (!this.jobs.length) return Promise.resolve();
+    this.idleWaiters ??= [];
+    return new Promise((resolve) => this.idleWaiters.push(resolve));
   }
 
   draw() {

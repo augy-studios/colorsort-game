@@ -41,7 +41,7 @@ import { newSeed, parseSeed } from "./seed.js";
 import { enqueue, isQueued, isStalled, nameQueued, recordedResult, remember, waiting } from "./queue.js";
 import { REPLAY_VERSION } from "./replay-format.js";
 import { replayLinkFor, shareReplay } from "./replay.js";
-import { copyText, currentView, escapeHtml, formatTime, setIcon, showView, store } from "./ui.js";
+import { copyText, currentView, escapeHtml, formatTime, reducedMotion, setIcon, showView, store } from "./ui.js";
 
 const SAVE_KEY = "uwusort.game";
 const PROGRESS_KEY = "uwusort.progress";
@@ -180,6 +180,7 @@ function begin(saved, { paused = false } = {}) {
   board.onDrop = onDrop;
   board.onDragStart = onDragStart;
   board.setup(view());
+  shownScore = null; // a new level shows its score as it is
   const m = MODES[seed.mode];
   $("hudLevel").textContent = `${m.label} · ${DIFFICULTIES[seed.difficulty].label} · Level ${seed.level}`;
   $("seedChip").textContent = seed.text;
@@ -231,7 +232,7 @@ function draw(change = null) {
   const { state } = g;
   board.render(view(), change);
   const p = state.players[0];
-  $("hudScore").textContent = String(liveScore(state));
+  setScore(liveScore(state));
   $("hudMoves").textContent = String(p.moves);
   $("hudDone").textContent = `${p.completed}/${state.colours}`;
   $("undoBtn").disabled = !state.history.length || !running;
@@ -249,14 +250,65 @@ function say(text) {
   $("caption").textContent = text;
 }
 
+/* ---- the score on screen ----
+   Points earned rise from under the score box into the number, and the
+   number then counts up to its new value rather than jumping. */
+
+const POP_MS = 620; // how long the points take to rise into the score
+let shownScore = null; // the number on screen right now
+let scoreTween = null; // { to, raf } while it counts
+let scoreHoldUntil = 0; // counting waits for a rising pop to arrive
+
+function setScore(target) {
+  const el = $("hudScore");
+  if (shownScore === null || reducedMotion()) {
+    if (scoreTween) cancelAnimationFrame(scoreTween.raf);
+    scoreTween = null;
+    shownScore = target;
+    el.textContent = String(target);
+    return;
+  }
+  if (scoreTween ? scoreTween.to === target : shownScore === target) return;
+  if (scoreTween) cancelAnimationFrame(scoreTween.raf);
+  const from = shownScore;
+  const start = Math.max(performance.now(), scoreHoldUntil);
+  const dur = Math.min(900, 380 + Math.abs(target - from) * 3);
+  const step = (now) => {
+    const p = Math.max(0, Math.min(1, (now - start) / dur));
+    shownScore = Math.round(from + (target - from) * (1 - (1 - p) ** 3));
+    el.textContent = String(shownScore);
+    if (p < 1) scoreTween.raf = requestAnimationFrame(step);
+    else {
+      scoreTween = null;
+      shownScore = target;
+      el.textContent = String(target);
+    }
+  };
+  scoreTween = { to: target, raf: requestAnimationFrame(step) };
+}
+
 function popScore(points) {
   if (!points) return;
+  const box = $("hudScoreBox");
   const pop = document.createElement("span");
   pop.className = "score-pop";
   pop.textContent = `+${scale(points, g.state.setup)}`;
   pop.setAttribute("aria-hidden", "true");
-  $("hudScoreBox").append(pop);
-  setTimeout(() => pop.remove(), 900);
+  box.append(pop);
+  // From just under the box to the middle of the number, measured, so it
+  // lands on the score whatever size the box is.
+  const value = $("hudScore").getBoundingClientRect();
+  const popRect = pop.getBoundingClientRect();
+  const rise = value.top + value.height / 2 - (popRect.top + popRect.height / 2);
+  pop.style.setProperty("--rise", `${Math.round(rise)}px`);
+  pop.style.animationDuration = `${POP_MS}ms`;
+  if (!reducedMotion()) scoreHoldUntil = performance.now() + POP_MS * 0.8;
+  setTimeout(() => {
+    box.classList.remove("score-bump");
+    void box.offsetWidth;
+    box.classList.add("score-bump");
+  }, POP_MS * 0.8);
+  setTimeout(() => pop.remove(), POP_MS + 50);
 }
 
 /* ---- playing ---- */
@@ -350,8 +402,9 @@ function doMove(a, b, { fast = false } = {}) {
   g.selected = null;
   g.hint = null;
   const e = events[0];
-  draw({ a, b, n: e.n, fast });
+  // The points start rising first, so the score counts up as they land.
   popScore(e.points);
+  draw({ a, b, n: e.n, fast });
   const m = MODES[g.state.setup.seed.mode];
   if (e.completed) {
     board.pulse([b], "done");
@@ -629,7 +682,16 @@ function finish() {
       name: s.auto_submit && s.name ? s.name : null,
     });
   }
-  setTimeout(() => showResult(), 800);
+  // The result waits for the last move to finish playing out on the board,
+  // and a moment more to see the solved board, but never for long.
+  const shown = { done: false };
+  const show = () => {
+    if (shown.done) return;
+    shown.done = true;
+    setTimeout(() => showResult(), 700);
+  };
+  board.whenIdle().then(show);
+  setTimeout(show, 8000);
 }
 
 function showResult() {
@@ -807,6 +869,7 @@ export function initGame({ board: b, replayer: r }) {
   $("hintBtn").addEventListener("click", doHint);
   $("extraBtn").addEventListener("click", doExtra);
   $("exitBtn").addEventListener("click", exitLevel);
+  $("menuBtn").addEventListener("click", toSetup);
   $("nextBtn").addEventListener("click", () => {
     if (last) saveSettings({ mode: last.state.setup.seed.mode, difficulty: last.state.setup.seed.difficulty });
     start();
