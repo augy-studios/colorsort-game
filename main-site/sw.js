@@ -1,12 +1,12 @@
-const CACHE = "template-offline-v1";
+const CACHE = "uwusort-v1";
 
 const ASSETS = [
   "/",
   "/index.html",
   "/style.css",
   "/script.js",
-  "/templateicon1-192.png",
-  "/templateicon1-512.png",
+  "/UCS-192.png",
+  "/UCS-512.png",
   "/favicon.ico",
   "/manifest.json"
 ];
