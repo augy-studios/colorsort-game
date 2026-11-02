@@ -1,0 +1,1112 @@
+/* App layout and components. Theme tokens and primitives are in theme.css. */
+
+@font-face {
+  font-family: "Jua";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/jua-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root[data-mode="dark"] { color-scheme: dark; }
+
+/* Fixed-meaning colours, like the footer heart: a QR code is dark on light
+   or it does not scan, and the flat board's glass and metal are the pieces'
+   own colours. The colours of water and nuts are in js/palette.js. */
+:root {
+  --qr-light: #ffffff;
+  --qr-dark: #121815;
+  --heart: #34c759;
+  --metal: #c9ced3;
+  --metal-dark: #8e969e;
+  /* Vertical room the page keeps for everything around the board. */
+  --board-room: 360px;
+
+  /* Edge Tray tokens, per edge-tray-spec.md section 3. */
+  --glass-btn: 44px;
+  --edge: max(16px, calc(env(safe-area-inset-right) + 16px));
+  --tray-top: max(calc(var(--banner-h, 0px) + 14px), calc(env(safe-area-inset-top) + 14px));
+  --tray-time: 0.34s;
+  --tray-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* A swipe on the board is a move, never a pull to refresh or an overscroll
+   bounce. */
+html,
+body { overscroll-behavior: none; }
+
+h1, h2, h3 { font-weight: normal; }
+
+:focus-visible {
+  outline: 2px solid var(--brand-ink);
+  outline-offset: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--surface-strong);
+  border: 1px solid color-mix(in srgb, var(--ink) 25%, transparent);
+  color: var(--muted-strong);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+/* The update bar, when there is one, then the page column. */
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+.page {
+  flex: 1 0 auto;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 14px;
+  padding-top: max(14px, env(safe-area-inset-top));
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.noscript { padding: 16px; text-align: center; }
+
+/* ---- the brand line: the logo and the name, and nothing else ---- */
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--glass-btn);
+  min-width: 0;
+}
+.brand-icon {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 10px;
+}
+.brand-name {
+  font-size: 1.35rem;
+  color: var(--brand-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Tapped quickly, it must not zoom or select. */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ---- the Edge Tray, per edge-tray-spec.md section 5 ---- */
+
+/* Fixed top right. Lets clicks through except on its children. */
+.hud-right {
+  position: fixed;
+  z-index: 800;
+  top: var(--tray-top);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  pointer-events: none;
+  transition: top 0.2s ease;
+}
+.hud-right > * { pointer-events: auto; }
+
+/* The tray: tab + column. Collapsed, the whole thing shifts right until only
+   the tab is left, flush with the edge. */
+.tray {
+  --tray-shift: calc(var(--glass-btn) + 8px + var(--edge));
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  transition: transform var(--tray-time) var(--tray-ease);
+}
+.tray.collapsed { transform: translateX(var(--tray-shift)); }
+
+.tray-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: var(--glass-btn);
+  padding: 0;
+  border-radius: 12px;
+  background: var(--surface);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border: 1px solid var(--surface-border);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-radius var(--tray-time) var(--tray-ease);
+}
+.tray-tab > [data-icon] { display: inline-flex; }
+.tray-tab svg { width: 16px; height: 16px; transition: transform var(--tray-time) var(--tray-ease); }
+/* At the edge it is a tab: flat on the side the screen cuts off. */
+.tray.collapsed .tray-tab { border-radius: 12px 0 0 12px; border-right: none; }
+.tray.collapsed .tray-tab svg { transform: rotate(180deg); }
+
+.tray-buttons {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-right: var(--edge);
+}
+
+/* Separates the game's own windows from the look of the app. */
+.tray-rule {
+  width: 24px;
+  height: 1px;
+  margin: 2px 0;
+  background: color-mix(in srgb, var(--ink) 25%, transparent);
+}
+
+.glass-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--glass-btn);
+  height: var(--glass-btn);
+  padding: 0;
+  border-radius: 14px;
+  background: var(--surface);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border: 1px solid var(--surface-border);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.glass-btn:hover { transform: translateY(-1px); background: var(--surface-strong); }
+.glass-btn > [data-icon] { display: inline-flex; }
+.glass-btn svg { width: 22px; height: 22px; }
+
+/* The buttons unroll: each fades in, slides back from the edge and grows, 18 ms after
+   the one above it. They move by `translate` and `scale`, leaving `transform` to the
+   hover lift, so the list repeats the hover transitions. After .glass-btn, so it wins. */
+.tray-buttons > * {
+  transition:
+    opacity calc(var(--tray-time) * 0.8) ease,
+    translate var(--tray-time) var(--tray-ease),
+    scale var(--tray-time) var(--tray-ease),
+    transform 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+  transition-delay: calc(var(--i, 0) * 18ms), calc(var(--i, 0) * 18ms), calc(var(--i, 0) * 18ms), 0s, 0s, 0s;
+}
+.tray-buttons > :nth-child(2) { --i: 1; }
+.tray-buttons > :nth-child(3) { --i: 2; }
+.tray-buttons > :nth-child(4) { --i: 3; }
+.tray-buttons > :nth-child(5) { --i: 4; }
+.tray-buttons > :nth-child(6) { --i: 5; }
+.tray-buttons > :nth-child(7) { --i: 6; }
+.tray.collapsed .tray-buttons > * {
+  opacity: 0;
+  translate: 12px 0;
+  scale: 0.85;
+  transition-delay: 0s;
+}
+
+/* Keyboard focus must be visible on glass. */
+.tray-tab:focus-visible,
+.glass-btn:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* No slide on load for a tray left collapsed (section 6.4). */
+.tray-start-collapsed .tray { transform: translateX(var(--tray-shift)); transition: none; }
+.tray-start-collapsed .tray-buttons > * { opacity: 0; translate: 12px 0; scale: 0.85; transition: none; }
+.tray-start-collapsed .page,
+.tray-start-collapsed .brand { transition: none; }
+.tray-start-collapsed .tray-tab { border-radius: 12px 0 0 12px; border-right: none; }
+.tray-start-collapsed .tray-tab svg { transform: rotate(180deg); }
+
+/* Keeping content clear of the tray (section 5.1). The column meets the tray
+   at about 720 + 2 x (44 + 16 + 12) px. Open, the column keeps a strip clear;
+   collapsed, it takes the full width and only the brand line steps in. */
+.page,
+.brand {
+  transition: padding-right var(--tray-time) var(--tray-ease), padding-left var(--tray-time) var(--tray-ease);
+}
+@media (max-width: 920px) {
+  body.tray-open .page { padding-right: calc(var(--glass-btn) + var(--edge) + 12px); }
+  body:not(.tray-open) .brand { padding-right: calc(24px + 10px - 14px); }
+}
+
+/* ---- the card the views share ---- */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 18px;
+  text-align: center;
+}
+.card p { line-height: 1.5; color: var(--ink); }
+
+.panel {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  animation: panel-in 0.2s ease;
+}
+.panel[hidden],
+.panel [hidden] { display: none !important; }
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(6px); }
+}
+.panel-title {
+  font-size: 1.35rem;
+  color: var(--brand-ink);
+}
+.lead-text { max-width: 32em; }
+.summary {
+  padding: 8px 14px;
+  border-radius: 14px;
+  background: var(--surface-strong);
+  border: 1px solid var(--surface-border);
+}
+.field-group {
+  width: 100%;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.field-label {
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+.card .field-note,
+.field-note {
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.4;
+  max-width: 34em;
+}
+.field-note:empty { display: none; }
+
+.foot {
+  margin-top: auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.footer-heart { display: inline-flex; color: var(--heart); }
+.footer-heart svg { width: 14px; height: 14px; }
+
+/* ---- buttons, chips and fields ---- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 15px;
+  border-radius: 12px;
+  font-size: 0.88rem;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+.btn-primary {
+  background: var(--brand-fill);
+  color: var(--on-brand);
+}
+.btn-primary:hover { background: var(--brand-fill-strong); }
+.btn-quiet {
+  color: var(--ink);
+  border: 1px solid var(--surface-border);
+  background: var(--surface-strong);
+}
+.pill { border-radius: 999px; }
+.btn.big { padding: 12px 28px; font-size: 1.05rem; }
+.btn.big svg { width: 18px; height: 18px; }
+
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  background: var(--surface-strong);
+  border: 1px solid var(--surface-border);
+  font-size: 0.82rem;
+  color: var(--ink);
+  letter-spacing: 0.02em;
+}
+.chip.muted { color: var(--muted-strong); }
+.chip:empty { display: none; }
+
+.guess {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  max-width: 460px;
+}
+.field {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--surface-strong);
+  /* 3:1 against the card, as a field's edge must be. */
+  border: 1px solid color-mix(in srgb, var(--ink) 45%, transparent);
+  color: var(--ink);
+  font-size: 1rem;
+}
+.field::placeholder { color: var(--muted-strong); opacity: 1; }
+.seed-input,
+.code-input { letter-spacing: 0.06em; text-transform: uppercase; }
+.seed-input::placeholder,
+.code-input::placeholder { letter-spacing: normal; text-transform: none; }
+.guess .btn { padding: 10px 16px; font-size: 0.95rem; }
+
+.mode-toggle.thirds { grid-template-columns: repeat(3, 1fr); }
+.mode-btn { color: var(--muted-strong); }
+.mode-btn[aria-checked="true"],
+.mode-btn[aria-selected="true"] {
+  background: var(--brand-fill);
+  color: var(--on-brand);
+}
+.mode-btn:disabled { opacity: 1; cursor: default; }
+.mode-btn:disabled:not(.active) { color: var(--muted-strong); }
+.panel .mode-toggle { width: 100%; max-width: 460px; }
+
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.level-input {
+  flex: none;
+  width: 7em;
+  text-align: center;
+}
+
+/* ---- choosing a level ---- */
+
+.setup { gap: 14px; }
+.seed-form,
+.party-cta {
+  width: 100%;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--surface-border);
+  text-align: left;
+}
+.result .seed-form { border-top: none; padding-top: 0; align-items: center; }
+
+/* ---- a level in play ---- */
+
+.play { gap: 8px; }
+.hud-level { font-size: 0.9rem; color: var(--muted); }
+.hud {
+  width: 100%;
+  max-width: 560px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.hud-stat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 4px;
+  border-radius: 14px;
+  background: var(--surface-strong);
+  border: 1px solid var(--surface-border);
+}
+.hud-label {
+  font-size: 0.72rem;
+  color: var(--muted-strong);
+}
+.hud-value {
+  font-size: 1.15rem;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.score-pop {
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  transform: translateX(-50%);
+  color: var(--brand-ink);
+  font-size: 1rem;
+  pointer-events: none;
+  animation: score-pop 0.9s ease forwards;
+}
+@keyframes score-pop {
+  from { opacity: 1; transform: translate(-50%, 0); }
+  to { opacity: 0; transform: translate(-50%, -26px); }
+}
+
+.caption-row {
+  width: 100%;
+  max-width: 560px;
+  min-height: 1.5em;
+  display: flex;
+  justify-content: center;
+}
+.caption {
+  min-height: 1.5em;
+  color: var(--ink);
+}
+
+.tools,
+.play-foot {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.tools .btn { padding: 8px 12px; }
+.tools .btn:disabled { opacity: 0.5; }
+.play-foot .spacer { flex: 1; }
+.play-foot .btn { padding: 8px 12px; }
+
+/* ---- the board ----
+   Its host grows as large as the room around it allows; js/board.js lays
+   the columns out in rows to fit it. Every touch on it is the game's. */
+
+.stage {
+  position: relative;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+.board-host {
+  position: relative;
+  width: 100%;
+  height: clamp(240px, calc(100dvh - var(--board-room)), 760px);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: contain;
+}
+.board-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  touch-action: none;
+  animation: panel-in 0.22s ease;
+}
+
+.flat-board {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-content: center;
+  row-gap: calc(var(--u, 30px) * 0.5);
+}
+/* The canvas only while the 3D view is on. */
+/* !important: three.js sets display: block on its canvas inline. */
+.board-host:not(.is-3d) .board-canvas { display: none !important; }
+/* In 3D the flat columns stay for the keyboard and screen readers only. */
+.is-3d .flat-board { opacity: 0; pointer-events: none; }
+
+.fcol {
+  width: calc(100% / var(--per-row, 4));
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  padding: calc(var(--u, 30px) * 0.9) 0 4px;
+  border-radius: 14px;
+  cursor: pointer;
+  touch-action: none;
+}
+.fcol[aria-disabled="true"] { cursor: default; }
+.fcol-body {
+  position: relative;
+  display: flex;
+  flex-direction: column-reverse;
+  width: calc(var(--u, 30px) * 1.5);
+  height: calc(var(--u, 30px) * var(--cap, 4) + 14px);
+  padding: 3px 3px 4px;
+  transition: transform 0.18s ease;
+}
+.funit {
+  position: relative;
+  flex: none;
+  height: var(--u, 30px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--c);
+  transition: transform 0.18s ease;
+}
+.sym {
+  width: 56%;
+  height: 56%;
+  fill: var(--ci);
+  opacity: 0.8;
+}
+
+/* Water: a glass tube, rounded at the bottom. */
+.flat-board[data-mode="water"] .fcol-body {
+  border: 2px solid color-mix(in srgb, var(--ink) 45%, transparent);
+  border-top: none;
+  border-radius: 0 0 999px 999px;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  overflow: hidden;
+}
+.flat-board[data-mode="water"] .fcol.selected .fcol-body { transform: translateY(calc(var(--u, 30px) * -0.5)); }
+
+/* Bolts: a threaded shaft on a base, the nuts stacked on it. */
+.flat-board[data-mode="bolts"] .fcol-body::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 18%;
+  height: 100%;
+  translate: -50% 0;
+  border-radius: 999px 999px 0 0;
+  background: var(--metal);
+  border: 1px solid var(--metal-dark);
+}
+.flat-board[data-mode="bolts"] .fcol-body::after {
+  content: "";
+  position: absolute;
+  left: -6%;
+  right: -6%;
+  bottom: -4px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--metal);
+  border: 1px solid var(--metal-dark);
+}
+.flat-board[data-mode="bolts"] .funit {
+  margin-top: 2px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--ci) 50%, transparent);
+}
+.funit.lifted { transform: translateY(calc(var(--u, 30px) * -1)); }
+
+.fcol.selected { background: color-mix(in srgb, var(--brand-ink) 10%, transparent); }
+.fcol.target { background: color-mix(in srgb, var(--brand-ink) 20%, transparent); }
+.fcol.hint { outline: 2px dashed var(--warn); outline-offset: -2px; }
+.fcol.done .fcol-body { border-color: var(--ok); }
+.fcol.pulse-bad .fcol-body { animation: col-shake 0.3s ease; }
+.fcol.pulse-done .fcol-body { animation: col-pop 0.4s ease; }
+@keyframes col-shake {
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+@keyframes col-pop {
+  50% { transform: scale(1.06); }
+}
+
+/* Paused: the level is hidden, so a pause is not thinking time. */
+.stage.paused .board-host { visibility: hidden; }
+.pause-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border-radius: 18px;
+  background: var(--surface-strong);
+  animation: panel-in 0.18s ease;
+}
+.pause-title { font-size: 1.4rem; color: var(--brand-ink); }
+
+/* ---- the result ---- */
+
+.big-score {
+  font-size: 2.8rem;
+  line-height: 1.1;
+  color: var(--brand-ink);
+}
+.big-score small { font-size: 1rem; color: var(--muted); }
+.final-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  width: 100%;
+  max-width: 460px;
+}
+.final-stats div {
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--surface-strong);
+  border: 1px solid var(--surface-border);
+}
+.final-stats dt { font-size: 0.75rem; color: var(--muted-strong); }
+.final-stats dd { font-size: 1.05rem; color: var(--ink); }
+.breakdown,
+.standings {
+  list-style: none;
+  width: 100%;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.breakdown li,
+.standings li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+.breakdown li:nth-child(odd) { background: var(--surface); }
+.standings li { background: var(--surface-strong); border: 1px solid var(--surface-border); }
+.standings li.lead { background: var(--brand-fill); color: var(--on-brand); }
+.standings small,
+.players small { color: inherit; opacity: 0.85; }
+
+.seed-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.seed-code,
+code {
+  font-family: inherit;
+  letter-spacing: 0.06em;
+  color: var(--brand-ink);
+  user-select: text;
+}
+.seed-line .btn { padding: 5px 12px; }
+
+.record-status {
+  max-width: 460px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 0.9rem;
+}
+.record-status:empty { display: none; }
+.card .record-status.ok {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+}
+.submit {
+  width: 100%;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---- party ---- */
+
+.party { --board-room: 470px; }
+.party-status { min-height: 1.5em; }
+.card .party-status.error { color: var(--error); }
+#partyChoose,
+#partyLobby,
+#partyGame,
+#partyOver {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  animation: panel-in 0.2s ease;
+}
+.join-form {
+  width: 100%;
+  max-width: 460px;
+  display: grid;
+  grid-template-columns: 1fr 1.4fr auto;
+  align-items: center;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--surface-border);
+}
+.join-form .field-label { grid-column: 1 / -1; text-align: left; }
+.lobby-code {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.code-big {
+  font-size: 2.4rem;
+  letter-spacing: 0.22em;
+  color: var(--brand-ink);
+  user-select: text;
+}
+/* Centred, with its white quiet zone, so a phone pointed at the middle of
+   the screen finds it (STUN-p2p-spec.md, pairing codes). */
+.qr {
+  align-self: center;
+  padding: 10px;
+  border-radius: 16px;
+  background: var(--qr-light);
+}
+.qr svg {
+  width: 180px;
+  height: 180px;
+  display: block;
+}
+.qr .qr-bg { fill: var(--qr-light); }
+.qr .qr-fg { fill: var(--qr-dark); }
+.players {
+  list-style: none;
+  width: 100%;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.players li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 12px;
+  border-radius: 12px;
+  background: var(--surface-strong);
+  border: 1px solid var(--surface-border);
+  color: var(--ink);
+  font-size: 0.92rem;
+  text-align: left;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.players li.turn { background: var(--brand-fill); color: var(--on-brand); }
+.players li.away { color: var(--muted-strong); }
+.players.inline {
+  max-width: 560px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.party-turn { font-size: 1.1rem; color: var(--ink); }
+.party-turn.mine { color: var(--brand-ink); }
+
+/* ---- the replay ---- */
+
+/* The controls under the board stay on screen with it. */
+.replay { --board-room: 560px; }
+.is-full .replay { --board-room: 440px; }
+.is-full .party { --board-room: 330px; }
+.rp-boards { grid-auto-flow: column; grid-auto-columns: 1fr; }
+
+.replay-score { color: var(--ink); font-variant-numeric: tabular-nums; }
+.replay-bar {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--surface-strong);
+}
+.replay-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.replay-caption {
+  flex: 1;
+  min-width: 0;
+  min-height: 1.5em;
+  text-align: left;
+  color: var(--ink);
+}
+.replay-time {
+  font-size: 0.85rem;
+  color: var(--muted-strong);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The timeline. The range input's own track is see-through; the bar under
+   it, inset by half the thumb so the ends line up, draws the track and a
+   tick at each undo and hint. */
+.replay-track {
+  position: relative;
+  height: 24px;
+}
+.replay-marks {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 50%;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--ink) 18%, transparent);
+  pointer-events: none;
+}
+.replay-marks span {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--error);
+}
+.replay-marks span.hint { background: var(--warn); }
+.replay-seek {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 24px;
+  margin: 0;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+.replay-seek::-webkit-slider-runnable-track { height: 24px; background: transparent; }
+.replay-seek::-moz-range-track { background: transparent; }
+.replay-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--brand-ink);
+  border: 2px solid var(--bg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.replay-seek::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--brand-ink);
+  border: 2px solid var(--bg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.replay-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.replay-speed { grid-template-columns: repeat(4, auto); }
+.replay-speed .mode-btn { padding: 6px 10px; }
+.replay-steps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.replay-steps .play-btn {
+  width: 48px;
+  height: 48px;
+  background: var(--brand-fill);
+  color: var(--on-brand);
+}
+.keys-legend { font-size: 0.78rem; color: var(--muted); }
+
+/* ---- modals ----
+   Above the tray (800) and the update bar (900), as edge-tray-spec.md
+   orders them. */
+
+.modal-backdrop { z-index: 1000; }
+
+.modal .hidden { display: none !important; }
+.modal [hidden] { display: none !important; }
+.saved-name { font-size: 0.95rem; color: var(--ink); }
+.modal .guess { max-width: none; }
+.clear-name { align-self: flex-start; }
+#gateSkip { align-self: center; }
+
+.setting-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  font-size: 0.9rem;
+  color: var(--ink);
+  text-align: left;
+}
+.setting-toggle > span:first-child { flex: 1; }
+.switch-state { font-size: 0.8rem; color: var(--muted-strong); }
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 40px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--surface-strong);
+  border: 1px solid color-mix(in srgb, var(--ink) 45%, transparent);
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--muted-strong);
+  transition: transform 0.18s ease, background 0.18s ease;
+}
+.setting-toggle[aria-checked="true"] .switch {
+  background: var(--brand-ink);
+  border-color: var(--brand-ink);
+}
+.setting-toggle[aria-checked="true"] .switch::after {
+  background: var(--bg);
+  transform: translateX(16px);
+}
+
+.board-body {
+  min-height: 120px;
+  max-height: 50vh;
+  overflow-y: auto;
+  transition: opacity 0.15s ease;
+}
+.board-body[aria-busy="true"] { opacity: 0.6; }
+.board-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.board-table th {
+  padding: 6px 8px;
+  text-align: left;
+  font-weight: normal;
+  font-size: 0.8rem;
+  color: var(--muted-strong);
+}
+.board-table td {
+  padding: 7px 8px;
+  border-top: 1px solid var(--surface-border);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.board-table tr.me td { background: var(--brand-fill); color: var(--on-brand); }
+.board-table th:first-child,
+.board-table td:first-child { width: 2.5em; color: var(--muted-strong); }
+.board-table tr.me td:first-child { color: var(--on-brand); }
+.board-empty {
+  padding: 32px 8px;
+  text-align: center;
+  color: var(--muted);
+}
+
+/* ---- update bar, per update-bar-spec.md ----
+   Quieter than the page, full width, tinted enough to read as a notice.
+   Above the tray (z-index 800), which starts below it via --banner-h. */
+
+.update-notice {
+  position: relative;
+  z-index: 900;
+  flex: none;
+  background: color-mix(in srgb, var(--brand-ink) 12%, var(--bg));
+  border-bottom: 1px solid var(--surface-border);
+  color: var(--ink);
+  font-size: 0.875rem;
+}
+.update-notice-inner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0.5rem 1rem;
+  /* Under the notch on a phone, where the bar is the topmost thing on screen. */
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+}
+.update-notice p { flex: 1 1 auto; min-width: 0; }
+.update-notice .btn { flex: none; padding: 6px 12px; }
+.update-notice + .hud-right + .page,
+.update-notice ~ .page { padding-top: 14px; }
+
+/* ---- full screen ----
+   The footer goes and the board grows to the height of the screen. */
+
+.is-full .foot { display: none; }
+.is-full { --board-room: 250px; }
+.is-full .page { max-width: 1200px; }
+.is-full .card { padding: 14px; }
+
+@media (max-width: 480px) {
+  :root {
+    --glass-btn: 40px;
+    --edge: max(10px, calc(env(safe-area-inset-right) + 10px));
+    --board-room: 330px;
+  }
+  .page {
+    padding: 10px;
+    padding-top: max(10px, env(safe-area-inset-top));
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+  @media (max-width: 920px) {
+    body:not(.tray-open) .brand { padding-right: calc(24px + 10px - 10px); }
+  }
+  .card { padding: 14px 8px; }
+  .hud-value { font-size: 1rem; }
+  .final-stats { grid-template-columns: repeat(2, 1fr); }
+  .mode-toggle.thirds .mode-btn { font-size: 0.78rem; padding: 8px 4px; }
+  .tools .btn { padding: 7px 10px; font-size: 0.82rem; }
+  .join-form { grid-template-columns: 1fr 1fr; }
+  .join-form .btn { grid-column: 1 / -1; }
+  .code-big { font-size: 2rem; }
+  .update-notice-inner { flex-wrap: wrap; }
+  .update-notice p { flex-basis: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-right, .tray, .tray-tab, .tray-tab svg, .tray-buttons > *, .glass-btn, .page, .brand {
+    transition-duration: 0.001ms !important;
+    transition-delay: 0s !important;
+  }
+}

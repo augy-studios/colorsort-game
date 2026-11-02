@@ -2,6 +2,50 @@
 <html lang="en">
 
 <head>
+    <meta charset="utf-8">
+    <title>uwuSort | UwU Apps</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="description" content="Pour water and spin nuts until every tube and bolt holds one colour. Endless levels, shareable seeds and replays, leaderboards, and races with friends on the same wifi.">
+
+    <script>
+        (function () {
+            var k = "uwusort";
+            var m = localStorage.getItem(k + ".mode") || "light";
+
+            // Time based mode. Resolved here rather than in theme.js because
+            // theme.js runs after first paint, and an evening reader would
+            // otherwise watch a white page turn dark. Keep the two hours in
+            // step with LIGHT_FROM_HOUR and LIGHT_UNTIL_HOUR in js/theme.js.
+            document.documentElement.setAttribute("data-mode-preference", m);
+            if (m === "time") {
+                var h = new Date().getHours();
+                m = h >= 9 && h < 18 ? "light" : "dark";
+            }
+
+            var c = localStorage.getItem(k + ".colorTheme") || "classic";
+            document.documentElement.setAttribute("data-mode", m);
+            document.documentElement.setAttribute("data-color-theme", c);
+        })();
+    </script>
+    <script>
+        // A tray left collapsed lands collapsed, with no slide on load
+        // (edge-tray-spec.md, section 6.4). js/tray.js takes the class off.
+        try {
+            if (localStorage.getItem("uwusort.trayOpen") === "0")
+                document.documentElement.classList.add("tray-start-collapsed");
+        } catch (e) {}
+    </script>
+
+    <!-- three.js for the 3D board, vendored so it is precached. Loaded only
+         when the 3D view is on; the map just says where it lives. -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "/vendor/three/build/three.module.js"
+            }
+        }
+    </script>
+
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-FMCYFTFPEL"></script>
     <script>
@@ -18,44 +62,491 @@
         crossorigin="anonymous"></script>
 
     <link rel="manifest" href="/manifest.json" />
-
-    <meta charset="utf-8">
-    <title>uwuSort | UwU Apps</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="A simple uwusort app; view live uwusort at a glance!">
+    <link rel="canonical" href="https://sortr.uwuapps.org/" />
 
     <meta property="og:type" content="website">
+    <meta property="og:url" content="https://sortr.uwuapps.org/" />
     <meta property="og:title" content="uwuSort | UwU Apps" />
     <meta property="og:site_name" content="UwU Apps" />
-    <meta property="og:description" content="A simple uwusort app; view live uwusort at a glance!" />
+    <meta property="og:description" content="Pour water and spin nuts until every tube and bolt holds one colour. Endless levels, shareable seeds and replays, leaderboards, and races with friends on the same wifi." />
 
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Jua">
-    <link rel="stylesheet" href="/style.css">
+    <!-- Jua is self-hosted, so the first offline visit has it too. -->
+    <link rel="preload" href="/fonts/jua-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/css/theme.css">
+    <link rel="stylesheet" href="/css/style.css">
     <meta name="theme-color" content="#ccffcc" />
+    <meta name="application-name" content="uwuSort" />
+    <meta name="apple-mobile-web-app-title" content="uwuSort" />
 
     <!-- Embed Image -->
     <link rel="apple-touch-icon" href="/UCS-main.png">
     <link rel="icon" href="/favicon.ico">
     <link rel="shortcut icon" href="/favicon.ico">
     <meta name="twitter:card" content="summary">
-    <meta name="twitter:image:src" content="/UCS-main.png">
-    <meta property="og:image" content="/UCS-main.png" />
-
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-    <script defer="" src="https://use.fontawesome.com/releases/v6.5.2/js/all.js"></script>
+    <meta name="twitter:image:src" content="https://sortr.uwuapps.org/UCS-512.png">
+    <meta property="og:image" content="https://sortr.uwuapps.org/UCS-512.png" />
 </head>
 
 <body>
-    uwuSort
+    <!-- The Edge Tray (edge-tray-spec.md): global actions top right, which
+         slide off the edge and leave the arrow tab to bring them back. -->
+    <div class="hud-right">
+        <div id="tray" class="tray">
+            <button id="trayTab" class="tray-tab" type="button" aria-controls="trayButtons" aria-expanded="true" aria-label="Hide menu" title="Hide menu">
+                <span data-icon="chevron"></span>
+            </button>
+            <div id="trayButtons" class="tray-buttons">
+                <button id="fullBtn" class="glass-btn" type="button" aria-label="Full screen" title="Full screen">
+                    <span data-icon="expand"></span>
+                </button>
+                <button id="partyBtn" class="glass-btn" type="button" aria-label="Play with others" title="Play with others">
+                    <span data-icon="users"></span>
+                </button>
+                <button id="boardBtn" class="glass-btn" type="button" aria-haspopup="dialog" aria-label="Leaderboard" title="Leaderboard">
+                    <span data-icon="trophy"></span>
+                </button>
+                <span class="tray-rule" aria-hidden="true"></span>
+                <button id="settingsBtn" class="glass-btn" type="button" aria-haspopup="dialog" aria-label="Settings" title="Settings">
+                    <span data-icon="settings"></span>
+                </button>
+                <button id="themeBtn" class="glass-btn" type="button" aria-haspopup="dialog" aria-label="Theme" title="Theme">
+                    <span data-icon="sun"></span>
+                </button>
+                <a id="coffeeBtn" class="glass-btn" href="https://donate.stripe.com/28o2akeAr3hv0DK6oo" target="_blank"
+                    rel="noopener noreferrer" aria-label="Buy Augy a Coffee" title="Buy Augy a Coffee">
+                    <span data-icon="coffee"></span>
+                </a>
+            </div>
+        </div>
+    </div>
 
-    <script src="/script.js"></script>
+    <div class="page">
+        <!-- The brand line: the logo and the name, and nothing else. -->
+        <header class="brand">
+            <img class="brand-icon" src="/UCS-192.png" alt="" width="34" height="34">
+            <h1 class="brand-name" id="brandName">uwuSort</h1>
+        </header>
 
-    <script>
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.register('/sw.js');
-        }
-    </script>
-    
+        <noscript>
+            <p class="noscript glass">uwuSort needs JavaScript to play.</p>
+        </noscript>
+
+        <main class="card glass game">
+            <!-- Choosing a level. -->
+            <section id="setup" class="panel setup" aria-labelledby="setupTitle">
+                <h2 id="setupTitle" class="panel-title">Sort every colour</h2>
+                <p id="rulesText" class="lead-text"></p>
+
+                <div class="field-group">
+                    <p class="field-label" id="modeLabel">Mode</p>
+                    <div class="mode-toggle" id="modePick" role="radiogroup" aria-labelledby="modeLabel">
+                        <button class="mode-btn" type="button" role="radio" aria-checked="true" data-mode-pick="water"><span data-icon="water"></span>Water</button>
+                        <button class="mode-btn" type="button" role="radio" aria-checked="false" data-mode-pick="bolts"><span data-icon="nut"></span>Bolts</button>
+                    </div>
+                </div>
+
+                <div class="field-group">
+                    <p class="field-label" id="difficultyLabel">Difficulty</p>
+                    <div class="mode-toggle thirds" id="difficultyPick" role="radiogroup" aria-labelledby="difficultyLabel">
+                        <button class="mode-btn" type="button" role="radio" aria-checked="true" data-difficulty="easy">Easy</button>
+                        <button class="mode-btn" type="button" role="radio" aria-checked="false" data-difficulty="medium">Medium</button>
+                        <button class="mode-btn" type="button" role="radio" aria-checked="false" data-difficulty="hard">Hard</button>
+                    </div>
+                </div>
+
+                <p id="setupSummary" class="summary"></p>
+                <p id="viewNote" class="field-note" role="status"></p>
+                <div class="panel-actions">
+                    <button id="startBtn" class="btn btn-primary pill big" type="button">
+                        <span data-icon="play"></span><span id="playLabel">Play level 1</span>
+                    </button>
+                    <button id="resumeBtn" class="btn btn-quiet pill" type="button" hidden>
+                        <span data-icon="refresh"></span>Resume level
+                    </button>
+                    <button id="setupBoardBtn" class="btn btn-quiet pill" type="button">
+                        <span data-icon="trophy"></span>Leaderboard
+                    </button>
+                </div>
+                <p id="startNote" class="field-note" role="status" aria-live="polite"></p>
+                <p id="queueNote" class="field-note" role="status" aria-live="polite"></p>
+
+                <form class="seed-form" autocomplete="off">
+                    <label for="setupSeedInput" class="field-label">Play a seed</label>
+                    <div class="guess">
+                        <input id="setupSeedInput" class="field seed-input" type="text" placeholder="WE12-BXK4-M9TR" maxlength="24"
+                            autocapitalize="characters" spellcheck="false" enterkeyhint="go">
+                        <button class="btn btn-quiet" type="submit">Play seed</button>
+                    </div>
+                    <p class="seed-msg field-note" role="status" aria-live="polite"></p>
+                    <p class="field-note">The same seed deals the same level. Levels on a pasted seed are not scored.</p>
+                </form>
+
+                <div class="party-cta">
+                    <p class="field-label">Play with others</p>
+                    <p class="field-note">Two to four players, each on their own phone or computer, on the same wifi. Race on the same level, or take turns on one.</p>
+                    <button id="setupPartyBtn" class="btn btn-quiet pill" type="button">
+                        <span data-icon="users"></span>Host or join a party
+                    </button>
+                </div>
+            </section>
+
+            <!-- A level in play. -->
+            <section id="play" class="panel play" aria-label="Level" hidden>
+                <p id="hudLevel" class="hud-level"></p>
+                <div class="hud" role="group" aria-label="Level stats">
+                    <div class="hud-stat" id="hudScoreBox"><span class="hud-label">Score</span><span id="hudScore" class="hud-value">0</span></div>
+                    <div class="hud-stat"><span class="hud-label">Moves</span><span id="hudMoves" class="hud-value">0</span></div>
+                    <div class="hud-stat"><span class="hud-label">Done</span><span id="hudDone" class="hud-value">0/0</span></div>
+                    <div class="hud-stat"><span class="hud-label">Time</span><span id="hudTime" class="hud-value">0:00</span></div>
+                </div>
+                <p class="caption-row"><span id="caption" class="caption" role="status" aria-live="polite"></span></p>
+
+                <div id="playStage" class="stage">
+                    <div id="pauseOverlay" class="pause-overlay" hidden>
+                        <p class="pause-title">Paused</p>
+                        <p class="field-note">The level is hidden while the clock is stopped.</p>
+                        <button id="continueBtn" class="btn btn-primary pill" type="button"><span data-icon="play"></span>Continue</button>
+                    </div>
+                </div>
+
+                <div class="tools">
+                    <button id="undoBtn" class="btn btn-quiet pill" type="button" aria-keyshortcuts="U"><span data-icon="undo"></span>Undo</button>
+                    <button id="restartBtn" class="btn btn-quiet pill" type="button"><span data-icon="refresh"></span><span id="restartLabel">Restart</span></button>
+                    <button id="hintBtn" class="btn btn-quiet pill" type="button"><span data-icon="bulb"></span><span id="hintLabel">Hint</span></button>
+                    <button id="extraBtn" class="btn btn-quiet pill" type="button"><span data-icon="plus"></span><span id="extraLabel">Extra tube</span></button>
+                </div>
+
+                <div class="play-foot">
+                    <span class="chip"><span class="visually-hidden">Seed </span><span id="seedChip"></span></span>
+                    <span id="scoredChip" class="chip"></span>
+                    <span class="spacer"></span>
+                    <button id="pauseBtn" class="btn btn-quiet pill" type="button" aria-label="Pause" aria-keyshortcuts="P">
+                        <span data-icon="pause"></span>
+                    </button>
+                    <button id="exitBtn" class="btn btn-quiet pill" type="button">
+                        <span data-icon="leave"></span><span id="exitLabel">Leave level</span>
+                    </button>
+                </div>
+                <p class="keys-legend">
+                    <kbd>&larr;</kbd> <kbd>&rarr;</kbd> move between columns, <kbd>Enter</kbd> pick up and put down, <kbd>U</kbd> undo, <kbd>P</kbd> pause.
+                </p>
+            </section>
+
+            <!-- A level's result. -->
+            <section id="result" class="panel result" aria-labelledby="resultTitle" hidden>
+                <h2 id="resultTitle" class="panel-title">Level solved</h2>
+                <p id="resultMeta" class="field-note"></p>
+                <p class="big-score"><span id="resultScore">0</span> <small>points</small></p>
+                <dl id="resultStats" class="final-stats"></dl>
+                <ul id="resultBreakdown" class="breakdown" aria-label="How the score was made"></ul>
+                <p class="seed-line">
+                    Seed <code class="seed-code"></code>
+                    <button class="btn btn-quiet pill" type="button" data-copy-seed><span data-icon="copy"></span><span class="copy-label">Copy</span></button>
+                </p>
+
+                <p id="recordStatus" class="record-status" role="status" aria-live="polite"></p>
+                <form id="submitForm" class="submit" autocomplete="off" hidden>
+                    <label for="nameInput" class="field-label">Add this level to the leaderboard</label>
+                    <div class="guess">
+                        <input id="nameInput" class="field" type="text" placeholder="Your name" maxlength="20"
+                            autocomplete="nickname" spellcheck="false" enterkeyhint="done">
+                        <button id="submitBtn" class="btn btn-primary" type="submit">Add</button>
+                    </div>
+                    <p id="submitMsg" class="field-note" role="status" aria-live="polite"></p>
+                    <p class="field-note">Names are shared: anyone who picks the same one shares its entry.</p>
+                </form>
+
+                <div class="panel-actions">
+                    <button id="nextBtn" class="btn btn-primary pill" type="button"><span data-icon="play"></span><span id="nextBtnLabel">Next level</span></button>
+                    <button id="replayBtn" class="btn btn-quiet pill" type="button"><span data-icon="replay"></span>Watch replay</button>
+                    <button id="shareBtn" class="btn btn-quiet pill" type="button"><span data-icon="share"></span><span id="shareLabel">Share replay</span></button>
+                    <button id="sameSeedBtn" class="btn btn-quiet pill" type="button"><span data-icon="refresh"></span>Same seed again</button>
+                    <button id="resultBoardBtn" class="btn btn-quiet pill" type="button"><span data-icon="trophy"></span>Leaderboard</button>
+                </div>
+                <form class="seed-form" autocomplete="off">
+                    <label for="resultSeedInput" class="visually-hidden">Seed to play</label>
+                    <div class="guess">
+                        <input id="resultSeedInput" class="field seed-input" type="text" placeholder="Paste a seed" maxlength="24"
+                            autocapitalize="characters" spellcheck="false" enterkeyhint="go">
+                        <button class="btn btn-quiet" type="submit">Play seed</button>
+                    </div>
+                    <p class="seed-msg field-note" role="status" aria-live="polite"></p>
+                </form>
+            </section>
+
+            <!-- Party games. -->
+            <section id="party" class="panel party" aria-labelledby="partyTitle" hidden>
+                <h2 id="partyTitle" class="visually-hidden">Party</h2>
+                <p id="partyStatus" class="party-status" role="status" aria-live="polite"></p>
+                <p id="partyStale" class="party-status error" hidden>The connection looks stale.</p>
+
+                <div id="partyChoose">
+                    <h3 class="panel-title">Play with others</h3>
+                    <p class="field-note">Two to four players, each on their own device. Everyone has to be on the same wifi, or one device shares a hotspot and the others join it. Party games are not scored.</p>
+                    <div class="panel-actions">
+                        <button id="hostBtn" class="btn btn-primary pill" type="button"><span data-icon="wifi"></span>Host a party</button>
+                    </div>
+                    <form id="joinForm" class="join-form" autocomplete="off">
+                        <p class="field-label">Join a party</p>
+                        <label for="joinCode" class="visually-hidden">Party code</label>
+                        <input id="joinCode" class="field code-input" type="text" placeholder="Code" maxlength="8"
+                            autocapitalize="characters" spellcheck="false" enterkeyhint="go">
+                        <label for="joinName" class="visually-hidden">Your name</label>
+                        <input id="joinName" class="field" type="text" placeholder="Your name" maxlength="20" autocomplete="nickname" spellcheck="false">
+                        <button class="btn btn-quiet" type="submit">Join</button>
+                    </form>
+                    <button id="partyBackBtn" class="btn btn-quiet pill" type="button"><span data-icon="leave"></span>Back</button>
+                </div>
+
+                <div id="partyLobby" hidden>
+                    <div class="host-only lobby-code">
+                        <p class="field-label">Join with this code</p>
+                        <p id="partyCode" class="code-big"></p>
+                        <div id="partyQr" class="qr"></div>
+                        <p><a id="partyLink" href="#" rel="nofollow"></a></p>
+                        <div class="panel-actions">
+                            <button id="copyJoinBtn" class="btn btn-quiet pill" type="button"><span data-icon="link"></span><span id="copyJoinLabel">Copy link</span></button>
+                            <button id="newCodeBtn" class="btn btn-quiet pill" type="button"><span data-icon="refresh"></span>New code</button>
+                        </div>
+                    </div>
+                    <p class="guest-only field-note">Waiting for the host to start the game.</p>
+                    <p class="field-label"><span id="lobbyCount"></span></p>
+                    <ol id="lobbyPlayers" class="players"></ol>
+
+                    <p class="field-label">How to play</p>
+                    <div class="mode-toggle" id="pFormat">
+                        <button class="mode-btn" type="button" data-format="race" aria-pressed="false">Race</button>
+                        <button class="mode-btn" type="button" data-format="turns" aria-pressed="false">Take turns</button>
+                    </div>
+                    <p class="field-label">Mode</p>
+                    <div class="mode-toggle" id="pMode">
+                        <button class="mode-btn" type="button" data-p-mode="water" aria-pressed="false"><span data-icon="water"></span>Water</button>
+                        <button class="mode-btn" type="button" data-p-mode="bolts" aria-pressed="false"><span data-icon="nut"></span>Bolts</button>
+                    </div>
+                    <p class="field-label">Difficulty</p>
+                    <div class="mode-toggle thirds" id="pDifficulty">
+                        <button class="mode-btn" type="button" data-difficulty="easy" aria-pressed="false">Easy</button>
+                        <button class="mode-btn" type="button" data-difficulty="medium" aria-pressed="false">Medium</button>
+                        <button class="mode-btn" type="button" data-difficulty="hard" aria-pressed="false">Hard</button>
+                    </div>
+                    <p class="field-label"><label for="pLevel">Level</label></p>
+                    <div class="stepper">
+                        <button id="pLevelDown" class="icon-btn" type="button" aria-label="Level down"><span data-icon="stepBack"></span></button>
+                        <input id="pLevel" class="field level-input" type="number" min="1" max="99999" step="1" inputmode="numeric" value="1">
+                        <button id="pLevelUp" class="icon-btn" type="button" aria-label="Level up"><span data-icon="stepForward"></span></button>
+                    </div>
+                    <p id="lobbySummary" class="field-note"></p>
+
+                    <div class="panel-actions">
+                        <button id="partyStartBtn" class="btn btn-primary pill host-only" type="button"><span data-icon="play"></span>Start the game</button>
+                        <button class="btn btn-quiet pill" type="button" data-party-leave><span data-icon="leave"></span>Leave</button>
+                    </div>
+                    <p id="partyStartNote" class="field-note host-only"></p>
+                </div>
+
+                <div id="partyGame" hidden>
+                    <p id="partyTurn" class="party-turn" aria-live="polite"></p>
+                    <p id="partyCaption" class="caption"></p>
+                    <div id="partyStage" class="stage"></div>
+                    <div class="tools">
+                        <button id="pUndo" class="btn btn-quiet pill" type="button"><span data-icon="undo"></span>Undo</button>
+                        <button id="pHint" class="btn btn-quiet pill" type="button"><span data-icon="bulb"></span>Hint</button>
+                        <button id="pExtra" class="btn btn-quiet pill" type="button"><span data-icon="plus"></span><span id="pExtraLabel">Extra tube</span></button>
+                    </div>
+                    <ol id="partyPlayers" class="players inline" aria-label="Players"></ol>
+                    <div class="panel-actions">
+                        <button id="partyEndBtn" class="btn btn-quiet pill host-only" type="button"><span data-icon="flag"></span><span id="partyEndLabel">End game</span></button>
+                        <button class="btn btn-quiet pill" type="button" data-party-leave><span data-icon="leave"></span><span id="partyLeaveLabel">Leave</span></button>
+                    </div>
+                </div>
+
+                <div id="partyOver" hidden>
+                    <h3 id="partyOverTitle" class="panel-title"></h3>
+                    <ol id="partyStandings" class="standings"></ol>
+                    <p class="field-note">Seed <code id="partySeed"></code></p>
+                    <div class="panel-actions">
+                        <button id="partyReplayBtn" class="btn btn-primary pill" type="button"><span data-icon="replay"></span>Watch replay</button>
+                        <button id="partyShareBtn" class="btn btn-quiet pill" type="button"><span data-icon="share"></span><span id="partyShareLabel">Share replay</span></button>
+                        <button id="partyAgainBtn" class="btn btn-quiet pill host-only" type="button"><span data-icon="refresh"></span>Play again</button>
+                        <button class="btn btn-quiet pill" type="button" data-party-leave><span data-icon="leave"></span>Leave</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- A replay: the level just played, a party's, or one from a link. -->
+            <section id="replay" class="panel replay" aria-labelledby="replayTitle" hidden>
+                <h2 id="replayTitle" class="visually-hidden">Replay</h2>
+                <p id="rpMeta" class="field-note"></p>
+                <p id="rpTrust" class="field-note"></p>
+                <div class="mode-toggle rp-boards" id="rpBoards" role="radiogroup" aria-label="Whose board" hidden></div>
+                <p id="rpScore" class="replay-score"></p>
+                <div id="rpStage" class="stage"></div>
+                <div id="rpSummary"></div>
+                <div class="replay-bar glass">
+                    <div class="replay-head">
+                        <p id="rpCaption" class="replay-caption" aria-live="polite"></p>
+                        <span id="rpTime" class="replay-time"></span>
+                    </div>
+                    <div class="replay-track">
+                        <!-- A tick for each undo and hint. -->
+                        <div id="rpMarks" class="replay-marks" aria-hidden="true"></div>
+                        <input id="rpSeek" class="replay-seek" type="range" min="0" max="0" step="1" value="0" aria-label="Replay position">
+                    </div>
+                    <div class="replay-controls">
+                        <div class="mode-toggle replay-speed" id="rpSpeed" role="radiogroup" aria-label="Replay speed">
+                            <button class="mode-btn" type="button" role="radio" aria-checked="false" data-speed="0.5">0.5×</button>
+                            <button class="mode-btn" type="button" role="radio" aria-checked="true" data-speed="1">1×</button>
+                            <button class="mode-btn" type="button" role="radio" aria-checked="false" data-speed="2">2×</button>
+                            <button class="mode-btn" type="button" role="radio" aria-checked="false" data-speed="4">4×</button>
+                        </div>
+                        <div class="replay-steps">
+                            <button id="rpBack" class="icon-btn" type="button" aria-label="Back a step" aria-keyshortcuts="ArrowLeft"><span data-icon="stepBack"></span></button>
+                            <button id="rpPlay" class="icon-btn play-btn" type="button" aria-label="Play replay" aria-keyshortcuts="Space"><span data-icon="play"></span></button>
+                            <button id="rpForward" class="icon-btn" type="button" aria-label="Forward a step" aria-keyshortcuts="ArrowRight"><span data-icon="stepForward"></span></button>
+                        </div>
+                    </div>
+                    <div class="panel-actions">
+                        <button id="rpShare" class="btn btn-quiet pill" type="button"><span data-icon="share"></span><span id="rpShareLabel">Share replay</span></button>
+                        <button id="rpSeed" class="btn btn-quiet pill" type="button" hidden><span data-icon="play"></span>Play this seed</button>
+                        <button id="rpDone" class="btn btn-primary pill" type="button" aria-keyshortcuts="Escape"><span data-icon="close"></span>Done</button>
+                    </div>
+                    <p class="keys-legend">
+                        <kbd>Space</kbd> play or pause, <kbd>&larr;</kbd> <kbd>&rarr;</kbd> step, <kbd>Esc</kbd> done.
+                    </p>
+                </div>
+            </section>
+        </main>
+
+        <footer class="foot">
+            Made with <span class="footer-heart" data-icon="heartFilled" aria-label="love" role="img"></span> by Augy
+        </footer>
+    </div>
+
+    <!-- The leaderboard name, asked before the first level -->
+    <div class="modal-backdrop hidden" id="nameModal">
+        <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="nameModalTitle">
+            <div class="modal-head">
+                <h2 id="nameModalTitle">Pick a leaderboard name</h2>
+                <button class="icon-btn small" type="button" data-close-modal="nameModal" aria-label="Close">
+                    <span data-icon="close"></span>
+                </button>
+            </div>
+            <p class="mode-note">Every level you finish goes on the Water and Bolts leaderboards under this name, and your highest level is tracked from level 1. You can change it in Settings.</p>
+            <form id="gateForm" class="guess" autocomplete="off">
+                <label for="gateName" class="visually-hidden">Leaderboard name</label>
+                <input id="gateName" class="field" type="text" placeholder="Your name" maxlength="20"
+                    autocomplete="nickname" spellcheck="false" enterkeyhint="go">
+                <button id="gateSave" class="btn btn-primary" type="submit">Save and play</button>
+            </form>
+            <p id="gateMsg" class="mode-note" role="status" aria-live="polite"></p>
+            <p class="mode-note">Names are shared: anyone who picks the same one shares its entry.</p>
+            <button id="gateSkip" class="btn btn-quiet pill" type="button">Play without a name</button>
+        </div>
+    </div>
+
+    <!-- Leaderboard modal -->
+    <div class="modal-backdrop hidden" id="boardModal">
+        <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="boardModalTitle">
+            <div class="modal-head">
+                <h2 id="boardModalTitle">Leaderboard</h2>
+                <button class="icon-btn small" type="button" data-close-modal="boardModal" aria-label="Close">
+                    <span data-icon="close"></span>
+                </button>
+            </div>
+            <div class="mode-toggle" id="boardModes" role="tablist" aria-label="Mode">
+                <button class="mode-btn" type="button" role="tab" data-lb-mode="water" aria-selected="true" aria-controls="boardBody"><span data-icon="water"></span>Water</button>
+                <button class="mode-btn" type="button" role="tab" data-lb-mode="bolts" aria-selected="false" aria-controls="boardBody"><span data-icon="nut"></span>Bolts</button>
+            </div>
+            <div class="mode-toggle thirds" id="boardTabs" role="tablist" aria-label="Board">
+                <button class="mode-btn" type="button" role="tab" data-board="best" aria-selected="true" aria-controls="boardBody">Best score</button>
+                <button class="mode-btn" type="button" role="tab" data-board="total" aria-selected="false" aria-controls="boardBody">Total points</button>
+                <button class="mode-btn" type="button" role="tab" data-board="level" aria-selected="false" aria-controls="boardBody">Top level</button>
+            </div>
+            <div class="mode-toggle thirds" id="boardDifficulty" role="tablist" aria-label="Difficulty" hidden>
+                <button class="mode-btn" type="button" role="tab" data-lb-difficulty="easy" aria-selected="true" aria-controls="boardBody">Easy</button>
+                <button class="mode-btn" type="button" role="tab" data-lb-difficulty="medium" aria-selected="false" aria-controls="boardBody">Medium</button>
+                <button class="mode-btn" type="button" role="tab" data-lb-difficulty="hard" aria-selected="false" aria-controls="boardBody">Hard</button>
+            </div>
+            <div id="boardBody" class="board-body" role="tabpanel"></div>
+            <p id="boardNote" class="mode-note"></p>
+            <p class="mode-note">Anyone who picks the same name shares its entry.</p>
+        </div>
+    </div>
+
+    <!-- Settings modal -->
+    <div class="modal-backdrop hidden" id="settingsModal">
+        <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
+            <div class="modal-head">
+                <h2 id="settingsModalTitle">Settings</h2>
+                <button class="icon-btn small" type="button" data-close-modal="settingsModal" aria-label="Close">
+                    <span data-icon="close"></span>
+                </button>
+            </div>
+
+            <p class="modal-section-label">Leaderboard name</p>
+            <p id="savedName" class="saved-name"></p>
+            <form id="nameForm" class="guess" autocomplete="off">
+                <label for="settingsName" class="visually-hidden">New leaderboard name</label>
+                <input id="settingsName" class="field" type="text" placeholder="New name" maxlength="20"
+                    autocomplete="nickname" spellcheck="false" enterkeyhint="done">
+                <button id="saveNameBtn" class="btn btn-primary" type="submit">Save</button>
+            </form>
+            <p id="nameMsg" class="mode-note" role="status" aria-live="polite"></p>
+            <button id="clearNameBtn" class="btn btn-quiet pill clear-name" type="button">Clear name</button>
+
+            <p class="modal-section-label">Levels</p>
+            <button class="setting-toggle" type="button" role="switch" aria-checked="true" data-setting="auto_submit">
+                <span>Add finished levels to the leaderboard</span>
+                <span class="switch-state"></span><span class="switch" aria-hidden="true"></span>
+            </button>
+            <p id="autoNote" class="mode-note">Save a name first to add levels automatically.</p>
+            <button class="setting-toggle" type="button" role="switch" aria-checked="false" data-setting="auto_replay">
+                <span>Play the replay when a level ends</span>
+                <span class="switch-state"></span><span class="switch" aria-hidden="true"></span>
+            </button>
+            <button class="setting-toggle" type="button" role="switch" aria-checked="true" data-setting="confirm_costs">
+                <span>Ask before a hint or the extra column</span>
+                <span class="switch-state"></span><span class="switch" aria-hidden="true"></span>
+            </button>
+
+            <p class="modal-section-label">Board</p>
+            <div class="mode-toggle" id="viewToggle">
+                <button class="mode-btn" type="button" data-view="3d" aria-pressed="false">3D</button>
+                <button class="mode-btn" type="button" data-view="flat" aria-pressed="false">Flat</button>
+            </div>
+            <button class="setting-toggle" type="button" role="switch" aria-checked="true" data-setting="symbols">
+                <span>Show a symbol on each colour</span>
+                <span class="switch-state"></span><span class="switch" aria-hidden="true"></span>
+            </button>
+
+            <p class="mode-note">
+                Settings are kept in this browser. Levels finished offline are added once you are back online.
+            </p>
+        </div>
+    </div>
+
+    <!-- Theme picker modal -->
+    <div class="modal-backdrop hidden" id="themeModal">
+        <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="themeModalTitle">
+            <div class="modal-head">
+                <h2 id="themeModalTitle">Theme</h2>
+                <button class="icon-btn small" type="button" data-close-modal="themeModal" aria-label="Close">
+                    <span data-icon="close"></span>
+                </button>
+            </div>
+            <p class="modal-section-label">Mode</p>
+            <div class="mode-toggle" id="modeToggle">
+                <button class="mode-btn" type="button" data-mode="light" aria-pressed="false"><span data-icon="sun"></span>Light</button>
+                <button class="mode-btn" type="button" data-mode="dark" aria-pressed="false"><span data-icon="moon"></span>Dark</button>
+                <button class="mode-btn mode-btn-wide" type="button" data-mode="time" aria-pressed="false"><span data-icon="clock"></span>Time-based</button>
+            </div>
+            <p class="mode-note" id="modeNote" hidden></p>
+            <p class="modal-section-label">Brand colour</p>
+            <div class="swatch-grid" id="swatchGrid"></div>
+        </div>
+    </div>
+
+    <script type="module" src="/js/app.js"></script>
 </body>
 
 </html>

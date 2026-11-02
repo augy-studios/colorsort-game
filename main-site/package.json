@@ -1,0 +1,10 @@
+{
+  "name": "uwusort",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "uwuSort by UwU Apps: the PWA and its leaderboard API, deployed on Vercel.",
+  "engines": {
+    "node": ">=20"
+  }
+}

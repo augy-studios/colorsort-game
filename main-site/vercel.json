@@ -6,5 +6,34 @@
     "rewrites": [{
         "source": "/",
         "destination": "/"
+    }, {
+        "source": "/join",
+        "destination": "/"
+    }, {
+        "source": "/r/:id([A-Za-z0-9]{8})",
+        "destination": "/"
+    }],
+    "functions": {
+        "api/play/record.js": {
+            "maxDuration": 60,
+            "includeFiles": "js/{rules,seed,puzzle,palette}.js"
+        },
+        "api/leaderboard/submit.js": {
+            "includeFiles": "js/{rules,seed,puzzle,palette}.js"
+        },
+        "api/leaderboard/index.js": {
+            "includeFiles": "js/{rules,puzzle,palette}.js"
+        },
+        "api/run/start.js": {
+            "includeFiles": "js/{rules,seed,puzzle,palette}.js"
+        },
+        "api/replay/create.js": {
+            "maxDuration": 30,
+            "includeFiles": "js/{rules,seed,puzzle,palette,replay-format}.js"
+        }
+    },
+    "headers": [{
+        "source": "/sw.js",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
     }]
 }

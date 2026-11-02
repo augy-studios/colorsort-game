@@ -1,0 +1,6 @@
+# Secrets for `vercel dev`; the real values live in Vercel.
+.env
+.env.*
+!.env.example
+.vercel/
+node_modules/

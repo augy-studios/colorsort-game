@@ -1,16 +1,24 @@
 {
     "name": "uwuSort by UwU Apps",
     "short_name": "uwuSort",
-    "description": "A simple uwusort app; view live uwusort at a glance!",
+    "description": "Pour water and spin nuts until every tube and bolt holds one colour. Endless levels, shareable seeds and replays, leaderboards, and races with friends on the same wifi.",
     "icons": [{
             "src": "UCS-192.png",
             "type": "image/png",
-            "sizes": "192x192"
+            "sizes": "192x192",
+            "purpose": "any"
         },
         {
             "src": "UCS-512.png",
             "type": "image/png",
-            "sizes": "512x512"
+            "sizes": "512x512",
+            "purpose": "any"
+        },
+        {
+            "src": "UCS-512.png",
+            "type": "image/png",
+            "sizes": "512x512",
+            "purpose": "maskable"
         }
     ],
     "screenshots": [{
@@ -37,8 +45,7 @@
     "scope": "/",
     "lang": "en",
     "categories": [
-        "entertainment",
-        "lifestyle",
-        "utilities"
+        "games",
+        "entertainment"
     ]
 }

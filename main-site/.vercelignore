@@ -1,0 +1,4 @@
+# Everything in main-site is served as a static file, so keep env files out
+# of deployments, including a CLI deploy from a machine with a real .env.
+.env
+.env.*
