@@ -39,7 +39,7 @@
 //    answer, not a stale one, and a cached level start would be somebody
 //    else's.
 
-const VERSION = "uwusort-v6";
+const VERSION = "uwusort-v7";
 
 const SHELL = `uwusort-shell-${VERSION}`;
 
