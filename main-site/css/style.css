@@ -1140,3 +1140,35 @@ code {
     transition-delay: 0s !important;
   }
 }
+
+/* ---- light mode button edges ----
+   In light mode the glass edge (--surface-border) is near white, so a button
+   is told from the page only by its tint, and the pale brand tints are the
+   first thing colour blindness takes away. Every button gets a dark edge
+   instead, a deep shade of the selected brand colour so it still belongs to
+   the theme, at well over 3:1 against the page. Dark mode keeps its glass
+   edges, which already read against the dark backdrop. Width and colour are
+   set on their own, never the border shorthand, so rules that drop one side
+   (the collapsed tray tab) or recolour it (the active swatch) still hold. */
+:root:not([data-mode="dark"]) {
+  --btn-edge: color-mix(in srgb, var(--brand) 30%, var(--ink));
+  --btn-edge-width: 1.5px;
+}
+
+:root:not([data-mode="dark"]) :is(.btn-primary, .btn-quiet, .glass-btn, .icon-btn, .tray-tab, .setting-toggle, .swatch:not(.active)) {
+  border-style: solid;
+  border-width: var(--btn-edge-width);
+  border-color: var(--btn-edge);
+}
+/* The collapsed tab is flat on its screen side; keep that edge off. */
+:root:not([data-mode="dark"]) .tray.collapsed .tray-tab { border-right-style: none; }
+
+/* Segmented toggles: only the chosen segment is edged, so the choice shows
+   by its outline as well as its fill. The others keep an invisible edge of
+   the same width so nothing shifts when the choice moves. */
+:root:not([data-mode="dark"]) .mode-btn {
+  border: var(--btn-edge-width) solid transparent;
+}
+:root:not([data-mode="dark"]) :is(.mode-btn.active, .mode-btn[aria-checked="true"], .mode-btn[aria-selected="true"]) {
+  border-color: var(--btn-edge);
+}
