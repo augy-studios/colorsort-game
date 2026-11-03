@@ -49,6 +49,7 @@ import { newSeed, parseSeed } from "./seed.js";
 import { REPLAY_VERSION, cleanReplay, cleanText } from "./replay-format.js";
 import { shareReplay } from "./replay.js";
 import { getSettings } from "./settings.js";
+import { celebrate } from "./confetti.js";
 import { copyText, currentView, escapeHtml, formatTime, showView, store } from "./ui.js";
 
 const MAX_PLAYERS = 4;
@@ -149,6 +150,7 @@ function boardView(snap, extra = {}) {
 function renderParty(snap) {
   snapNow = snap;
   if (snap.phase === "over") lastReplay = snap.replay ? cleanReplay(snap.replay) : null;
+  cheer(snap);
   if (currentView() !== "party") return;
   const host = role === "host";
   document.querySelectorAll("#party .host-only").forEach((el) => (el.hidden = !host));
@@ -257,6 +259,29 @@ function renderParty(snap) {
     .join("");
   $("partyOverTitle").textContent = results.length ? `${results[0].name} wins` : "Game over";
   $("partySeed").textContent = snap.replay?.seed ?? "";
+}
+
+// Confetti once per game, when this player solves it in a race or the shared
+// board is solved in take turns. Only for a game seen being played on this
+// device, so reloading or rejoining a finished party does not set it off, and
+// not for a game the host ended before it was solved.
+let cheerSeen = -1;
+let cheered = -1;
+function cheer(snap) {
+  if (snap.phase === "game") cheerSeen = snap.game;
+  if (cheerSeen !== snap.game || cheered === snap.game) return;
+  const race = snap.options.format === "race";
+  let solved = false;
+  if (snap.phase === "game") solved = race && snap.players[snap.you]?.finished != null;
+  else if (snap.phase === "over") {
+    const results = snap.results ?? [];
+    solved = race
+      ? results.find((r) => r.index === snap.you)?.finished != null
+      : snap.colours > 0 && results.reduce((n, r) => n + r.done, 0) >= snap.colours;
+  }
+  if (!solved) return;
+  cheered = snap.game;
+  if (currentView() === "party") celebrate();
 }
 
 /* ---- picking and moving, on this device ---- */

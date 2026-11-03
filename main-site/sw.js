@@ -39,7 +39,7 @@
 //    answer, not a stale one, and a cached level start would be somebody
 //    else's.
 
-const VERSION = "uwusort-v9";
+const VERSION = "uwusort-v10";
 
 const SHELL = `uwusort-shell-${VERSION}`;
 
@@ -60,6 +60,7 @@ const PRECACHE = [
   "/js/app.js",
   "/js/board.js",
   "/js/board3d.js",
+  "/js/confetti.js",
   "/js/game.js",
   "/js/icons.js",
   "/js/leaderboard.js",

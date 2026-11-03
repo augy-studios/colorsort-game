@@ -1174,3 +1174,14 @@ code {
 :root:not([data-mode="dark"]) :is(.mode-btn.active, .mode-btn[aria-checked="true"], .mode-btn[aria-selected="true"]) {
   border-color: var(--btn-edge);
 }
+
+/* ---- confetti ----
+   Over everything, modals included, and never in the way of a tap. */
+.confetti {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1100;
+  pointer-events: none;
+}

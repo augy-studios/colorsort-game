@@ -18,6 +18,7 @@
 
 import { api } from "./api.js";
 import { askName, getSettings, saveSettings } from "./settings.js";
+import { celebrate } from "./confetti.js";
 import {
   DIFFICULTIES,
   EXTRA,
@@ -662,6 +663,7 @@ function finish() {
   running = false;
   store.remove(SAVE_KEY);
   draw();
+  celebrate();
   const game = g;
   const [r] = finalScores(game.state);
   const seed = game.state.setup.seed;
