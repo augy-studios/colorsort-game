@@ -1149,13 +1149,15 @@ code {
    the theme, at well over 3:1 against the page. Dark mode keeps its glass
    edges, which already read against the dark backdrop. Width and colour are
    set on their own, never the border shorthand, so rules that drop one side
-   (the collapsed tray tab) or recolour it (the active swatch) still hold. */
+   (the collapsed tray tab) still hold. The chosen swatch keeps its own
+   colour ring too, now outside the dark edge, so it is told by its double
+   outline and not by a pale colour alone. */
 :root:not([data-mode="dark"]) {
   --btn-edge: color-mix(in srgb, var(--brand) 30%, var(--ink));
   --btn-edge-width: 1.5px;
 }
 
-:root:not([data-mode="dark"]) :is(.btn-primary, .btn-quiet, .glass-btn, .icon-btn, .tray-tab, .setting-toggle, .swatch:not(.active)) {
+:root:not([data-mode="dark"]) :is(.btn-primary, .btn-quiet, .glass-btn, .icon-btn, .tray-tab, .setting-toggle, .swatch) {
   border-style: solid;
   border-width: var(--btn-edge-width);
   border-color: var(--btn-edge);
