@@ -141,6 +141,21 @@ check(rh.result.score > re.result.score, "hard scores more than easy");
   check(found, "a bolts level uncovers a hidden nut");
 }
 
+/* ---- hard water hides layers too ---- */
+
+{
+  const ws = newSeed("water", "hard", 1, bytes("hiddenwater"));
+  const state = rules.createGame({ seed: ws, timed: false });
+  check(state.cols.flat().some((u) => u >= 16), "a hard water level starts with hidden layers");
+  const path = solve(state.cols, state.cap);
+  check(Array.isArray(path), "and can be solved");
+  let revealed = false;
+  path.forEach(([a, b], i) => (revealed = rules.move(state, a, b, (i + 1) * 1000)[0].revealed || revealed));
+  check(revealed && state.cols.flat().every((u) => u < 16), "and shows every layer by the end");
+  const medium = rules.createGame({ seed: newSeed("water", "medium", 1, bytes("hiddenwater")), timed: false });
+  check(medium.cols.flat().every((u) => u < 16), "medium water hides nothing");
+}
+
 /* ---- turns: a finished column keeps the turn ---- */
 
 {

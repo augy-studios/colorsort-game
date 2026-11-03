@@ -32,13 +32,14 @@ export const EMPTIES = 2;
 
 // Each difficulty starts at `from` colours and adds one every `every`
 // levels up to `to`. `cap` is how many of a colour there are, and so how
-// tall a column is. Bolts hide every nut but the top one on
-// `hiddenPerTen` in ten of their bolts, rounded down.
+// tall a column is. `hiddenPerTen` in ten of the full columns, rounded
+// down, hide every unit but the top one: nuts on Medium and Hard bolts,
+// layers of water on Hard tubes.
 const SHAPES = {
   water: {
     easy: { cap: 4, from: 3, to: 5, every: 3, hiddenPerTen: 0 },
     medium: { cap: 4, from: 6, to: 8, every: 4, hiddenPerTen: 0 },
-    hard: { cap: 4, from: 9, to: 12, every: 5, hiddenPerTen: 0 },
+    hard: { cap: 4, from: 9, to: 12, every: 5, hiddenPerTen: 3 },
   },
   bolts: {
     easy: { cap: 3, from: 3, to: 5, every: 3, hiddenPerTen: 0 },

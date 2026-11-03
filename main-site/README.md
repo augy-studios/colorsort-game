@@ -27,7 +27,7 @@ server always agree on a level.
 
 | File | What it does |
 | --- | --- |
-| `puzzle.js` | The columns, what a move does, hidden nuts, the solver, and dealing a level. |
+| `puzzle.js` | The columns, what a move does, hidden nuts and layers, the solver, and dealing a level. |
 | `rules.js` | Modes, difficulties and how each level is shaped; the game and its log; scoring; the server's check of a finished level. |
 | `seed.js` | Seeds. |
 | `palette.js` | The colours, each with a symbol. |
@@ -60,12 +60,13 @@ clock).
 | --- | --- | --- |
 | Easy | 4 a tube, 3 colours rising to 5 | 3 a bolt, 3 colours rising to 5 |
 | Medium | 4 a tube, 6 rising to 8 | 4 a bolt, 5 rising to 7; 4 in 10 bolts hide all but their top nut |
-| Hard | 4 a tube, 9 rising to 12 | 5 a bolt, 7 rising to 10; half the bolts hide all but their top nut |
+| Hard | 4 a tube, 9 rising to 12; 3 in 10 tubes hide all but their top layer | 5 a bolt, 7 rising to 10; half the bolts hide all but their top nut |
 
 Each difficulty adds a colour every few levels up to its cap, and there are
-always two empty columns. A hidden nut shows its colour when it reaches the
-top, and stays shown, undo or not. Every colour carries a symbol, in both
-views, so no two are told apart by colour alone.
+always two empty columns. A hidden nut or layer of water, grey with a
+question mark, shows its colour when it reaches the top, and stays shown,
+undo or not. Every colour carries a symbol, in both views, so no two are told
+apart by colour alone.
 
 **Helpers.** Unlimited undo, restart, a hint (the next move of a solution,
 from where you are), and once a level an extra empty column. Each costs a

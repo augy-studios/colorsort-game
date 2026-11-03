@@ -4,8 +4,8 @@
 // through this file, so a level dealt anywhere is the same level.
 //
 // A column is an array of units, bottom first. A unit is its colour index
-// (into js/palette.js), plus HIDDEN_FLAG while it is still hidden. Water
-// never has hidden units; bolts on Medium and Hard do.
+// (into js/palette.js), plus HIDDEN_FLAG while it is still hidden. Hard
+// water and Medium and Hard bolts have hidden units.
 //
 // Changing anything here that affects a deal or a move means games played on
 // the old build stop verifying, and old seeds deal different levels. See
